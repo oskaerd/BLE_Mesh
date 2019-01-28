@@ -1,7 +1,18 @@
 import sqlite3
 import socket
 import sys
+import atexit
+
 from mesh_packet import meshPacket, listToDict
+
+''' Clean-up at exit '''
+def exit_handler(server_fd, client_fd, db_conn):
+    print('atexit')
+    server_fd.close()
+    client_fd.close()
+    db_conn.close()
+
+measures_db = sqlite3.connect('measurements.db')
 
 HOST = '127.0.0.1'
 PORT = 3000
@@ -19,6 +30,8 @@ print('Socket listening ')
 conn, addr = s.accept()
 print( 'Connected to ' + addr[0] + ':' + str(addr[1]) )
 
+atexit.register(lambda: exit_handler(s, conn, measures_db))
+
 while True:
     data = conn.recv(1024)
     if len(data) > 0:
@@ -26,9 +39,8 @@ while True:
         measure = meshPacket(listToDict(data))
 
         # insert into database
+        
 
     else:
-        conn.close()
-        s.close()
         print('Closing')
         sys.exit(1)
