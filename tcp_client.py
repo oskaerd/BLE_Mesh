@@ -5,23 +5,22 @@ from mesh_packet import meshPacket, meshPacketTestCase
 
 packets = []
 
+# create test data
 test = meshPacket(meshPacketTestCase().getRandomData())
 
 print(test.dictToBytesArray())
 
-test.updateValues()
-
-print(test.dictToBytesArray())
-
-client_fd = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-
-server_fd = client_fd.connect(('127.0.0.1', 3000))
 
 try:
+    client_fd = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+    server_fd = client_fd.connect(('127.0.0.1', 3000))
+
     while True:
-        client_fd.send(bytes([7]))
+        client_fd.send( test.dictToBytesArray() )
+        # update random values
+        test.updateValues()
         time.sleep(5)
 except KeyboardInterrupt:
     print('bb')
-    server_fd.close()
     client_fd.close()

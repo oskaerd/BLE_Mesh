@@ -1,6 +1,7 @@
 import sqlite3
 import socket
 import sys
+from mesh_packet import meshPacket, listToDict
 
 HOST = '127.0.0.1'
 PORT = 3000
@@ -22,8 +23,12 @@ while True:
     data = conn.recv(1024)
     if len(data) > 0:
         # receive data and depending on opcode use proper table in db 
-        print(list(data))
+        measure = meshPacket(listToDict(data))
+
+        # insert into database
+
     else:
         conn.close()
+        s.close()
         print('Closing')
         sys.exit(1)

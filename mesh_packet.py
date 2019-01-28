@@ -4,6 +4,22 @@ import random
 
 NumberOfValues = 7
 
+''' Converts received byte-like array to proper format dictionary '''
+def listToDict( src ):
+    ret_dict = {}
+
+    ret_dict['opcode'] = src[0]
+    ret_dict['dev_id'] = (src[1] << 8) + src[2]
+    ret_dict['temperature'] = (src[3] << 8) + src[4]
+    ret_dict['humidity'] = src[5]
+    ret_dict['pressure'] = (src[6] << 24) + (src[7] << 16) + (src[8] << 8) + \
+                            src[9]
+    ret_dict['light'] = src[10]
+    ret_dict['battery_voltage'] = src[11]
+
+    return ret_dict
+
+
 class meshPacket:
     ''' Takes dictionary of expected values '''
     def __init__(self, values):
