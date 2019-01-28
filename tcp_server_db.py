@@ -56,6 +56,7 @@ while True:
         print(query)
         # insert into database
         measures_db.execute(query)
+        measures_db.commit()
     else:
         print('Closing')
         sys.exit(1)
