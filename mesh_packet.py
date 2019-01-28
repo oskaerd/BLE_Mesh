@@ -12,6 +12,7 @@ class meshPacket:
 
 
     def populate_data(self, values):
+        self.values = values
         self.opcode = values['opcode']
         self.id = values['dev_id']
         self.temperature = int(values['temperature'] * 1000)
@@ -23,8 +24,9 @@ class meshPacket:
     def updateValues(self):
         print('update')
         ret = meshPacketTestCase()
+        ret.printValues()
         self.populate_data(ret.getRandomData())
-        self.printValues()
+        
         return ret.getRandomData()
 
     def printValues(self):
