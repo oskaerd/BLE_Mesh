@@ -11,14 +11,17 @@ print(test.dictToBytesArray())
 
 test.updateValues()
 
-# client_fd = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+print(test.dictToBytesArray())
 
-# server_fd = client_fd.connect(('127.0.0.1', 3000))
+client_fd = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-# while True:
-#     client_fd.send(bytes([7]))
-#     time.sleep(5)
+server_fd = client_fd.connect(('127.0.0.1', 3000))
 
-# print('bb')
-# server_fd.close()
-# client_fd.close()
+try:
+    while True:
+        client_fd.send(bytes([7]))
+        time.sleep(5)
+except KeyboardInterrupt:
+    print('bb')
+    server_fd.close()
+    client_fd.close()
