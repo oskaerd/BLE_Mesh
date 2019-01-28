@@ -10,10 +10,10 @@ def listToDict( src ):
 
     ret_dict['opcode'] = src[0]
     ret_dict['dev_id'] = (src[1] << 8) + src[2]
-    ret_dict['temperature'] = (src[3] << 8) + src[4]
+    ret_dict['temperature'] = float((src[3] << 8) + src[4])/1000
     ret_dict['humidity'] = src[5]
-    ret_dict['pressure'] = (src[6] << 24) + (src[7] << 16) + (src[8] << 8) + \
-                            src[9]
+    ret_dict['pressure'] = float((src[6] << 24) + (src[7] << 16) + (src[8] << 8) + \
+                            src[9])/100
     ret_dict['light'] = src[10]
     ret_dict['battery_voltage'] = src[11]
 
@@ -26,6 +26,12 @@ class meshPacket:
         self.values = values
         self.populate_data(values)
 
+    def prepareDbQuery(self):
+        query = ''
+        for key in self.values:
+            if key != 'dev_id':
+                query = query + str(self.values[key]) + ', '
+        return query
 
     def populate_data(self, values):
         self.values = values
