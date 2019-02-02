@@ -20,7 +20,7 @@ try:
         client_fd.send( test.dictToBytesArray() )
         # update random values
         test.updateValues()
-        time.sleep(5)
+        time.sleep(1)
 except KeyboardInterrupt:
     print('bb')
     client_fd.close()

@@ -4,6 +4,9 @@ conn = sqlite3.connect('measurements.db')
 
 data = conn.execute('SELECT * FROM measurements')
 
-print(data.fetchall())
+data = data.fetchall()
+
+print(data)
+print('Database stores ' + str(len(data)) + ' records.')
 
 conn.close()

@@ -13,21 +13,21 @@ def exit_handler(server_fd, client_fd, db_conn):
     client_fd.close()
     db_conn.close()
 
-database_name = 'measurements.db'
+database_filename = 'measurements.db'
 db_insert_query = 'INSERT INTO measurements VALUES ('
 db_create_table_cmd = 'CREATE TABLE measurements \
                 (dev_id integer, temp real, humidity real, pressure real, \
                 lux real, battery integer)'
 
 # delete old data on startup
-if os.path.isfile(database_name):
-   os.remove(database_name)
+if os.path.isfile(database_filename):
+   os.remove(database_filename)
    print('Old data removed')
 
-measures_db = sqlite3.connect(database_name)
+measurements_db = sqlite3.connect(database_filename)
 
 # create table measurements
-measures_db.execute(db_create_table_cmd)
+measurements_db.execute(db_create_table_cmd)
 
 HOST = '127.0.0.1'
 PORT = 3000
@@ -43,7 +43,7 @@ print('Socket listening ')
 conn, addr = s.accept()
 print( 'Connected to ' + addr[0] + ':' + str(addr[1]) )
 
-atexit.register(lambda: exit_handler(s, conn, measures_db))
+atexit.register(lambda: exit_handler(s, conn, measurements_db))
 
 while True:
     data = conn.recv(1024)
@@ -55,8 +55,8 @@ while True:
         query = query[:-2] + ')'
         print(query)
         # insert into database
-        measures_db.execute(query)
-        measures_db.commit()
+        measurements_db.execute(query)
+        measurements_db.commit()
     else:
         print('Closing')
         sys.exit(1)

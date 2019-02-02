@@ -29,7 +29,7 @@ class meshPacket:
     def prepareDbQuery(self):
         query = ''
         for key in self.values:
-            if key != 'dev_id':
+            if key != 'opcode':
                 query = query + str(self.values[key]) + ', '
         return query
 
