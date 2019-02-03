@@ -19,7 +19,7 @@ class database_interface:
     def commit(self):
         self.db_conn.commit()
 
-    def getData(self):    
+    def getData(self):
         self.graph_data = self.db_conn.execute(db_read_query_head + db_read_query_tail)
         self.graph_data = self.graph_data.fetchall()
         return self.graph_data
@@ -31,8 +31,8 @@ class database_interface:
         records = self.getNumberOfRecords()
         self.db_conn.execute(query)
         if records > samplesToDisplay:
-            self.db_conn.execute('DELETE from measurements WHERE ROWID IN \
-                ( SELECT ROWID from measurements ORDER BY ROWID ASC LIMIT 20)')
+            self.db_conn.execute('DELETE FROM measurements WHERE ROWID IN \
+                (SELECT ROWID FROM measurements ORDER BY ROWID DESC LIMIT -1 OFFSET 21)')
 
     def getNumberOfRecords(self):
         return self.db_conn.execute(db_count_query).fetchall()[0][0]

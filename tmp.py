@@ -2,8 +2,8 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from matplotlib import style
 import atexit
+import datetime
 
-import sqlite3
 import socket
 import os
 import sys
@@ -16,7 +16,7 @@ from db_interface import database_filename, db_create_table_cmd, db_insert_query
 
 th_server = False
 
-X = deque(maxlen=20)
+X = deque(maxlen=21)
 
 REFRESH_RATE = 1
 HOST = '127.0.0.1'
@@ -43,8 +43,7 @@ def window_cls_handle(evt):
 
 fig.canvas.mpl_connect('close_event', window_cls_handle)
 
-i=0
-
+i = 0
 def animate(i):
     measurements_db = database_interface()
     X.append(i)
@@ -53,9 +52,13 @@ def animate(i):
     xs = X
     ys = []
     yss = []
+
     graph_data = measurements_db.getData()
+
+    for meas in graph_data:
+        ys.append(meas[1])
     yss=ys
-    yss = [i +1 for i in yss]
+    yss = [k+1 for k in yss]
 
     ax1.clear()
     ax1.plot(xs, ys, '.-')
