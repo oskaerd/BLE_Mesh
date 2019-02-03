@@ -3,6 +3,7 @@ import matplotlib.animation as animation
 from matplotlib import style
 import atexit
 
+import sqlite3
 import socket
 import os
 import sys
@@ -10,15 +11,13 @@ import _thread
 from collections import deque
 
 from mesh_packet import meshPacket, listToDict
+from db_interface import database_interface
+from db_interface import database_filename, db_create_table_cmd, db_insert_query
 
-database_filename = 'measurements.db'
-db_read_query_head = 'SELECT *'
-db_read_values = 'dev_id, temp, humidity, pressure, lux, battery)'
-db_read_query_tail = ' from measurements'
-db_create_table_cmd = 'CREATE TABLE measurements \
-                (dev_id integer, temp real, humidity real, pressure real, \
-                lux real, battery integer)'
-db_insert_query = 'INSERT INTO measurements VALUES ('
+th_server = False
+
+X = deque(maxlen=20)
+
 REFRESH_RATE = 1
 HOST = '127.0.0.1'
 PORT = 3000
@@ -44,28 +43,24 @@ def window_cls_handle(evt):
 
 fig.canvas.mpl_connect('close_event', window_cls_handle)
 
-def animate(i):
-    measurements_db = sqlite3.connect(database_filename)
+i=0
 
+def animate(i):
+    measurements_db = database_interface()
+    X.append(i)
+    i+=1
     graph_data = []
-    xs = []
+    xs = X
     ys = []
     yss = []
-    graph_data = measurements_db.execute(db_read_query_head + db_read_query_tail)
-    graph_data = graph_data.fetchall()
-
-    i=0
-    for meas in graph_data:
-        xs.append(i)
-        i+=1
-        ys.append(meas[1])
+    graph_data = measurements_db.getData()
     yss=ys
     yss = [i +1 for i in yss]
 
     ax1.clear()
     ax1.plot(xs, ys, '.-')
     ax1.plot(xs, yss, '.-')
-    measurements_db.close()
+    measurements_db.closeConn()
 
 def server(dummy):
     # delete old data on startup
@@ -73,10 +68,10 @@ def server(dummy):
         os.remove(database_filename)
         print('Old data removed')
 
-    measurements_db = sqlite3.connect(database_filename)
+    measurements_db = database_interface()
 
     # create table measurements
-    measurements_db.execute(db_create_table_cmd)
+    measurements_db.newTable('measurements')
     while True:
         data = conn.recv(1024)
         if len(data) > 0:
@@ -87,7 +82,7 @@ def server(dummy):
             query = query[:-2] + ')'
             print(query)
             # insert into database
-            measurements_db.execute(query)
+            measurements_db.writeData(query)
             measurements_db.commit()
         else:
             print('Closing')
@@ -100,7 +95,6 @@ def onClose(conn, s):
 if __name__=="__main__":
     atexit.register(lambda: onClose(conn, s))
     th_server = _thread.start_new_thread(server, ('server',))
-    
     ani = animation.FuncAnimation(fig, animate, interval=1000*REFRESH_RATE)
     plt.show()
 
