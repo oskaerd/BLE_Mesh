@@ -2,10 +2,12 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from matplotlib import style
 import atexit
-import sqlite3
+
 import socket
 import os
 import sys
+import _thread
+from collections import deque
 
 from mesh_packet import meshPacket, listToDict
 
@@ -32,25 +34,23 @@ print('Socket listening ')
 conn, addr = s.accept()
 print( 'Connected to ' + addr[0] + ':' + str(addr[1]) )
 
-# delete old data on startup
-if os.path.isfile(database_filename):
-   os.remove(database_filename)
-   print('Old data removed')
-
-measurements_db = sqlite3.connect(database_filename)
-
-# create table measurements
-measurements_db.execute(db_create_table_cmd)
-
-style.use('fivethirtyeight')
+style.use('dark_background')
 
 fig = plt.figure()
 ax1 = fig.add_subplot(1, 1, 1)
 
+def window_cls_handle(evt):
+    sys.exit(2)
+
+fig.canvas.mpl_connect('close_event', window_cls_handle)
+
 def animate(i):
+    measurements_db = sqlite3.connect(database_filename)
+
     graph_data = []
     xs = []
     ys = []
+    yss = []
     graph_data = measurements_db.execute(db_read_query_head + db_read_query_tail)
     graph_data = graph_data.fetchall()
 
@@ -59,19 +59,24 @@ def animate(i):
         xs.append(i)
         i+=1
         ys.append(meas[1])
+    yss=ys
+    yss = [i +1 for i in yss]
+
     ax1.clear()
-    ax1.plot(xs, ys)
-
-def onClose(db, conn, s):
+    ax1.plot(xs, ys, '.-')
+    ax1.plot(xs, yss, '.-')
     measurements_db.close()
-    conn.close()
-    s.close()
 
-if __name__=="__main__":
-    atexit.register(lambda: onClose(measurements_db, conn, s))
-    ani = animation.FuncAnimation(fig, animate, interval=1000)
-    plt.show()
+def server(dummy):
+    # delete old data on startup
+    if os.path.isfile(database_filename):
+        os.remove(database_filename)
+        print('Old data removed')
 
+    measurements_db = sqlite3.connect(database_filename)
+
+    # create table measurements
+    measurements_db.execute(db_create_table_cmd)
     while True:
         data = conn.recv(1024)
         if len(data) > 0:
@@ -87,3 +92,17 @@ if __name__=="__main__":
         else:
             print('Closing')
             sys.exit(1)
+
+def onClose(conn, s):
+    conn.close()
+    s.close()
+
+if __name__=="__main__":
+    atexit.register(lambda: onClose(conn, s))
+    th_server = _thread.start_new_thread(server, ('server',))
+    
+    ani = animation.FuncAnimation(fig, animate, interval=1000*REFRESH_RATE)
+    plt.show()
+
+    while True:
+        pass

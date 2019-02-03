@@ -87,7 +87,7 @@ class meshPacketTestCase:
         # test for opcode
         self.randomValues['opcode'] = 0xB3
         # test device id
-        self.randomValues['dev_id'] = 0xBEEF
+        self.randomValues['dev_id'] = 0xBEEF + random.randint(0,1)
         # append temperature 
         self.randomValues['temperature'] = 22 + 5*random.random()
         # append humidity
