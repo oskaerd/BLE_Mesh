@@ -15,15 +15,13 @@ set(SERIAL_SOURCE_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/serial_handler_app.c" CACHE INTERNAL "")
 
 set(SERIAL_INCLUDE_DIRS
-    "${SDK_ROOT}/modules/nrfx"
-    "${SDK_ROOT}/modules/nrfx/hal"
     "${CMAKE_CURRENT_SOURCE_DIR}/api"
     "${CMAKE_CURRENT_SOURCE_DIR}/include" CACHE INTERNAL "")
 
 set(lint_include_dirs
     ${SERIAL_INCLUDE_DIRS}
     ${${BOARD}_INCLUDE_DIRS}
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../examples/templates
+    ${CMAKE_CURRENT_SOURCE_DIR}/../app
     ${CMAKE_CURRENT_SOURCE_DIR}/api
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../prov/api
@@ -37,10 +35,8 @@ set(lint_include_dirs
     ${CMAKE_CURRENT_SOURCE_DIR}/../dfu/api
     ${CMAKE_CURRENT_SOURCE_DIR}/../dfu/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../dfu/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../test/include # sdk_config.h
     ${${SOFTDEVICE}_INCLUDE_DIRS}
-    ${${PLATFORM}_INCLUDE_DIRS}
-    ${${nRF5_SDK_VERSION}_INCLUDE_DIRS})
+    ${${PLATFORM}_INCLUDE_DIRS})
 
 add_pc_lint(serial_${PLATFORM}
     "${SERIAL_SOURCE_FILES}"

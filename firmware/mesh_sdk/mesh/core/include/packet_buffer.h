@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -51,36 +51,105 @@
  *
  * # Packet manager design
  * The packet manager provides functions for initializing packet manager instances and allocating
- * and deallocating packet buffers. It operates like an ordinary three stage ringbuffer with
- * allocation split up into "reserve" and "commit", and consuming split up similarly with "pop" and
- * "free". All returned memory is continuous, blocks contain a small header indicating their size
- * and state.
+ * and deallocating packet buffers.
  *
- * The packet manager design is based on four critical assumptions:
+ * The packet manager design is based on three critical assumptions:
  *
  * - One consumer and multiple producers.
  * - The packets are consumed in the same order they are produced.
  * - The consumer frees a popped packet before popping the next.
- * - The producer commits or discards a packet before doing the next reservation.
  *
- * There are 4 states a packet may be in:
+ * There are 5 states a packet buffer may be in:
  *
  * - `FREE` : Available to producers to acquire and use.
  * - `RESERVED`: Acquired by and in use by the producer. This state is entered by the
  *               packet_buffer_reserve() function.
- * - `COMMITTED`: Available to the consumer to acquire and read. This state is entered by the
+ * - `COMMITED`: Available to the consumer to acquire and read. This state is entered by the
  *               packet_buffer_commit() function.
  * - `POPPED`: Acquired by and in use of the consumer. This state is entered by calling the
  *             packet_buffer_pop() function. The consumer has to make a packet_buffer_free()
  *             call on this packet before it can acquire another packet.
+ * - `SKIPPED`: A packet that was dropped by the producer (not commited). It has no meaningful
+ *              information but have to be freed by a call to packet_buffer_pop() made by the consumer.
+ *              There are two scenarios that can cause a packet to be in this state:
+ *   1. The available space before the buffer wrap-around is not sufficient to satisfy a reserve
+ *      call, but the space starting from buffer 0 and up is sufficient. In this case the buffer
+ *      is skipped, as illustrated by the image below.
+ *   2. The producer decides to free a buffer after reserving it, but there have already been
+ *      other reservations of packets made that follow the freed buffer. In this case, the freed
+ *      buffer cannot be treated as a free buffer in order to avoid holes in the packet manager.
+ *   
+ * ![Producer/Consumer](packet_mgr_producer_consumer.svg)
  *
  * # Initializing
  *
  * Due to the limitation that only one consumer can use a packet buffer at a time, the problem
- * of having multiple consumers (such as when using multiple advertisers) is solved by using
- * multiple packet buffer instances, where the buffers are managed independently. Each packet buffer
- * instance is created by a call to packet_buffer_init(), which accepts a pool of memory, the size
- * of the pool and creates an initialized packet manager instance.
+ * of having multiple consumers (such as when using multiple advertisers) is solved by using multiple packet
+ * buffer instances, where the buffers are managed independently. Each packet buffer instance is
+ * created by a call to packet_buffer_init(), which accepts a pool of memory, the size of the pool
+ * and creates an initialized packet manager instance.
+ *
+ * @code{.c}
+ * static uint8_t buffer[128];
+ * packet_buffer_t packet_buffer;
+ * uint32_t status = packet_buffer_init(&packet_buffer, buffer, sizeof(buffer));
+ * @endcode
+ *
+ * ![Initial packet buffer state](packet_mgr_initial_state.svg)
+ *
+ * # Reserving packets
+ *
+ * Packet buffers are reserved using the packet_buffer_reserve() function.
+ *
+ * @code{.c}
+ * // Reserve a 10-byte packet
+ * packet_buffer_packet_t * p_packet;
+ * uint32_t status = packet_buffer_reserve(&packet_buffer, &p_packet, 10);
+ * @endcode
+ *
+ * ![Packet buffer state after reserving a buffer](packet_mgr_reserve_1.svg)
+ *
+ * After allocating a second packet, the packet buffer contains two reserved buffers:
+ *
+ * ![Packet buffer state after reserving two buffers](packet_mgr_reserve_2.svg)
+ *
+ * # Committing packets
+ *
+ * Packet buffers are committed using the packet_mgr_commit() function.
+ *
+ * @code{.c}
+ * // Commit the first reserved packet:
+ * packet_buffer_commit(&packet_buffer, p_packet, 10);
+ * @endcode
+ *
+ * ![Packet buffer state after committing the first reserved buffer](packet_mgr_commit.svg)
+ *
+ * # Popping packets
+ *
+ * Packet buffers are popped using the packet_buffer_pop() function.
+ *
+ * @code{.c}
+ * // Pop the first packet:
+ * packet_mgr_packet_t * p_popped_packet;
+ * uint32_t status = packet_buffer_pop(&packet_buffer, &p_popped_packet);
+ * @endcode
+ *
+ * ![Packet buffer state after popping the first packet buffer](packet_mgr_pop.svg)
+ *
+ * # Freeing packets
+ *
+ * Freeing packet buffers is done using the packet_buffer_free() function.
+ *
+ * @code{.c}
+ * // Free the popped packet buffer:
+ * uint32_t status = packet_mgr_free(&packet_buffer, &p_popped_packet);
+ * @endcode
+ *
+ * ![Packet buffer state after freeing the previously popped buffer](packet_mgr_free_1.svg)
+ *
+ * After freeing the remaining reserved buffer, the state of the packet buffer becomes:
+ *
+ * ![Packet buffer state after freeing all reserved buffers](packet_mgr_free_2.svg)
  *
  * @{
  */
@@ -94,7 +163,7 @@ typedef enum
     PACKET_BUFFER_MEM_STATE_RESERVED,  /**< The packet is reserved for allocation. */
     PACKET_BUFFER_MEM_STATE_COMMITTED, /**< The packet is committed to the buffer, and may be popped. */
     PACKET_BUFFER_MEM_STATE_POPPED,    /**< The packet has been popped from the buffer, but not yet freed. */
-    PACKET_BUFFER_MEM_STATE_PADDING    /**< The packet is just padding at the end of the ring buffer. */
+    PACKET_BUFFER_MEM_STATE_SKIPPED,   /**< The packet is not used but there are proceeding packets in use. */
 } packet_buffer_mem_state_t;
 
 /**
@@ -103,6 +172,7 @@ typedef enum
 typedef struct
 {
 #if PACKET_BUFFER_DEBUG_MODE
+    uint32_t seal;        /**< Packet seal, used for detecting memory corruptions. */
     uint32_t last_caller; /**< Address of last caller that modified refcount on the packet. */
 #endif
     uint16_t size;                       /**< Size of the packet in bytes */
@@ -164,13 +234,6 @@ void packet_buffer_init(packet_buffer_t * p_buffer, void * const p_pool, const u
 /**
  * Flushes a packet buffer, dropping all committed packets.
  *
- * Any popped packets held by the user are excempt from the flushing, and must be freed as normal.
- * The function will assert if any packets are reserved.
- *
- * @warning This function requires that:
- *               - p_buffer is not NULL
- *               - No packets are currently reserved.
- *
  * @param[in,out] p_buffer Buffer to flush.
  */
 void packet_buffer_flush(packet_buffer_t * p_buffer);
@@ -228,7 +291,8 @@ void packet_buffer_commit(packet_buffer_t * const p_buffer, packet_buffer_packet
  *
  * The packet must be freed before the next packet may be popped.
  *
- * @warning This function should only be used by the consumer.
+ * @warning This function is not thread safe.
+ *
  * @warning This function requires that:
  *               - Pointers supplied are not NULL
  *               - There is no other packet in popped state
@@ -246,7 +310,7 @@ void packet_buffer_commit(packet_buffer_t * const p_buffer, packet_buffer_packet
 /**
  * Checks if a packet can be popped right away.
  *
- * @warning This function should only be used by the consumer.
+ * @warning This function is not thread safe.
  *
  * @warning This function requires that:
  *               - Pointer supplied is not NULL.
@@ -265,7 +329,7 @@ bool packet_buffer_can_pop(packet_buffer_t * p_buffer);
  *                 in a right state to allow popping of a packet, use @ref packet_buffer_can_pop to
  *                 find out if a packet is available to be popped and if the packet manager is
  *                 ready.
- * @warning        This function should only be used by the consumer.
+ * @warning        This function is not thread safe.
  * @warning        This function requires that:
  *                  - Pointer supplied is not NULL.
  *
@@ -282,7 +346,8 @@ bool packet_buffer_packets_ready_to_pop(packet_buffer_t * p_buffer);
  * The packet must be in either the @ref PACKET_BUFFER_MEM_STATE_POPPED state or be the
  * last packet of the buffer to be in the @ref PACKET_BUFFER_MEM_STATE_RESERVED state.
  *
- * @warning This function should only be used by the consumer.
+ * @warning This function is not thread safe.
+ *
  * @warning This function requires that:
  *               - Pointers supplied are not NULL
  *               - The supplied packet is either in Popped state or Reserved state
@@ -292,20 +357,6 @@ bool packet_buffer_packets_ready_to_pop(packet_buffer_t * p_buffer);
  *
  */
 void packet_buffer_free(packet_buffer_t * const p_buffer, packet_buffer_packet_t * const p_packet);
-
-/**
- * Check whether the packet buffer is completely empty.
- *
- * Returns true if there are no packets in states @ref PACKET_BUFFER_MEM_STATE_RESERVED,
- * @ref PACKET_BUFFER_MEM_STATE_COMMITTED, or @ref PACKET_BUFFER_MEM_STATE_POPPED.
- *
- * @param[in] p_buffer The buffer to check.
- *
- * @retval true When the packet buffer is empty.
- * @retval false When the packet buffer has some packets.
- *
- */
-bool packet_buffer_is_empty(const packet_buffer_t * p_buffer);
 
 /** @} */
 

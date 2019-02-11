@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -39,7 +39,7 @@
 #include <cmock.h>
 #include <string.h>
 
-#include "utils.h"
+#include "nordic_common.h"
 #include "test_assert.h"
 
 #include "log.h"
@@ -49,22 +49,16 @@
 #include "access_internal.h"
 #include "access_config.h"
 #include "access_status.h"
-#include "access_utils.h"
 
 #include "access_publish_mock.h"
 #include "access_reliable_mock.h"
-#include "access_publish_retransmission_mock.h"
 
 #include "device_state_manager_mock.h"
 #include "flash_manager_mock.h"
 #include "nrf_mesh_events_mock.h"
 #include "nrf_mesh_mock.h"
-#include "nrf_mesh_utils_mock.h"
 #include "event_mock.h"
 #include "bearer_event_mock.h"
-#include "proxy_mock.h"
-#include "manual_mock_queue.h"
-#include "mesh_mem_mock.h"
 
 #define TEST_REFERENCE ((void*) 0xB00BB00B)
 #define TEST_MODEL_ID (0xB00B)
@@ -74,7 +68,6 @@
 #define GROUP_ADDRESS_START   (0xC001)
 #define PUBLISH_ADDRESS_START (0x0101)
 #define OPCODE_COUNT (5)
-#define ACCESS_LOOPBACK_FLAG  (0x11223344ul)
 
 #define MSG_EVT_MAX_COUNT (ACCESS_ELEMENT_COUNT)
 #define TX_EVT_MAX_COUNT (ACCESS_ELEMENT_COUNT)
@@ -82,7 +75,7 @@
 #define ALLOC_BUFFER_SIZE (380)
 
 #define FLASH_TEST_VECTOR_INSTANCE(MODEL_ID, ELEMENT_INDEX, P_SUB_ADDRS, NO_SUB_ADDRS, SUB_SHARE_IDX,\
-                                   PUB_HANDLE, PUB_PERIOD, P_APPKEYS, NO_APPKEYS, PUB_APPKEY, TTL, CRED) \
+                                   PUB_HANDLE, PUB_PERIOD, P_APPKEYS, NO_APPKEYS, PUB_APPKEY, TTL) \
     {\
         .add_params = {\
                         .model_id = (MODEL_ID),\
@@ -100,28 +93,8 @@
         .p_appkey_handles = (P_APPKEYS),\
         .number_of_appkey_handles = (NO_APPKEYS),\
         .publish_appkey_handle = (PUB_APPKEY),\
-        .publish_ttl = (TTL), \
-        .credential_flag = (CRED) \
+        .publish_ttl = (TTL)\
     }
-
-#define EXPECT(name, times) \
-    do { \
-        for (size_t i = 0; i < times; i++) \
-        { \
-            uint32_t value = 0; \
-            name##_Expect(&value); \
-        } \
-    } while(0)
-
-/*******************************************************************************
- * Sample data from the Mesh Profile Specification v1.0
- *******************************************************************************/
-
-/* Message #21 (the Mesh Profile Specification v1.0, page 309) */
-#define MSG_21_VENDOR_MODEL_OPCODE      (0x15 | 0xC0)
-#define MSG_21_VENDOR_MODEL_COMPANY_ID  (0x000a)
-#define MSG_21_ACCESS_PARAMS_RAW        {0x48, 0x65, 0x6c, 0x6c, 0x6f}
-#define MSG_21_ACCESS_PAYLOAD_RAW       {0xd5, 0x0a, 0x00, 0x48, 0x65, 0x6c, 0x6c, 0x6f}
 
 /*******************************************************************************
  * Structure definitions used for testing
@@ -140,7 +113,6 @@ typedef struct
     uint32_t number_of_appkey_handles;
     dsm_handle_t publish_appkey_handle;
     uint8_t publish_ttl;
-    bool credential_flag;
 } access_flash_test_struct_t;
 
 typedef struct
@@ -158,20 +130,6 @@ typedef struct
     uint16_t src;
     uint16_t dst;
 } tx_evt_t;
-
-typedef struct
-{
-    fm_handle_filter_t filter;
-    fm_entry_t ** pp_expected_entries;
-    uint32_t entry_count;
-} flash_manager_entries_read_expect_t;
-MOCK_QUEUE_DEF(flash_manager_entries_read_mock, flash_manager_entries_read_expect_t, NULL);
-
-typedef enum
-{
-    TX_SECMAT_TYPE_MASTER,
-    TX_SECMAT_TYPE_FRIENDSHIP,
-} tx_secmat_type_t;
 
 /*******************************************************************************
  * Static Variables
@@ -196,14 +154,6 @@ static flash_manager_config_t m_flash_manager_config;
 static fm_mem_listener_t * mp_mem_listener;
 static uint32_t m_flash_manager_calls;
 static uint32_t m_listener_register_calls;
-
-static bearer_event_flag_callback_t m_bearer_cb;
-
-static uint32_t m_dsm_tx_friendship_secmat_get_retval = NRF_SUCCESS;
-static uint16_t m_sub_list_dealloc_index;
-
-MOCK_QUEUE_DEF(access_publish_retransmission_message_add_mock, access_publish_retransmit_t, NULL);
-MOCK_QUEUE_DEF(mesh_mem_free_mock, uintptr_t, NULL);
 
 /*******************************************************************************
  * Helper Functions // Mocks // Callbacks
@@ -236,7 +186,7 @@ static void print_configuration(void)
     }
 }
 
-timestamp_t timer_now(void)
+timestamp_t timer_now()
 {
     return 0;
 }
@@ -268,7 +218,6 @@ static void update_test_model(access_flash_test_struct_t * p_test_data, access_m
          TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_application_bind(model_handle, p_test_data->p_appkey_handles[apps]));
     }
     TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_publish_address_set(model_handle, p_test_data->publish_address_handle));
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_publish_friendship_credential_flag_set(model_handle, p_test_data->credential_flag));
     TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_publish_ttl_set(model_handle, p_test_data->publish_ttl));
     if (expect_publish_period_set)
     {
@@ -365,35 +314,15 @@ static fm_entry_t * expect_flash_manager_entry(fm_handle_t handle, uint32_t data
     return p_entry;
 }
 
-
-static uint32_t flash_manager_entries_read_mock_cb(const flash_manager_t * p_manager,
-                                                   const fm_handle_filter_t * p_filter,
-                                                   flash_manager_read_cb_t read_cb,
-                                                   void * p_args,
-                                                   int calls)
+static void restore_flash(fm_handle_filter_t * p_filter, fm_entry_t ** p_expected_entries, uint32_t no_entries)
 {
-    flash_manager_entries_read_expect_t expect;
-    flash_manager_entries_read_mock_Consume(&expect);
-
-    TEST_ASSERT_EQUAL(expect.filter.mask, p_filter->mask);
-    TEST_ASSERT_EQUAL(expect.filter.match, p_filter->match);
-    for (uint32_t i = 0; i < expect.entry_count; ++i)
+    flash_manager_entry_next_get_ExpectWithArrayAndReturn(mp_flash_manager, 1, p_filter, 1, NULL, 1, p_expected_entries[0]);
+    for (uint32_t i = 1; i < no_entries; ++i)
     {
-        TEST_ASSERT_EQUAL(FM_ITERATE_ACTION_CONTINUE,
-                          read_cb(expect.pp_expected_entries[i], p_args));
+        flash_manager_entry_next_get_ExpectWithArrayAndReturn(mp_flash_manager, 1, p_filter, 1, p_expected_entries[i-1], 1, p_expected_entries[i]);
     }
-    return expect.entry_count;
-}
+    flash_manager_entry_next_get_ExpectWithArrayAndReturn(mp_flash_manager, 1, p_filter, 1, p_expected_entries[no_entries-1], 1, NULL);
 
-static void restore_flash(fm_handle_filter_t * p_filter, fm_entry_t ** pp_expected_entries, uint32_t entry_count)
-{
-    flash_manager_entries_read_StubWithCallback(flash_manager_entries_read_mock_cb);
-    flash_manager_entries_read_expect_t expect = {
-        .filter = *p_filter,
-        .pp_expected_entries = pp_expected_entries,
-        .entry_count = entry_count,
-    };
-    flash_manager_entries_read_mock_Expect(&expect);
 }
 
 static void evt_handler_add_stub(nrf_mesh_evt_handler_t * p_evt_handler, int num_calls)
@@ -421,15 +350,6 @@ static uint32_t flash_manager_add_stub(flash_manager_t * p_manager, const flash_
 
 }
 
-bearer_event_flag_t bearer_event_flag_add_cb(bearer_event_flag_callback_t cb, int num_calls)
-{
-    (void)num_calls;
-    TEST_ASSERT_NOT_NULL(cb);
-    m_bearer_cb = cb;
-
-    return ACCESS_LOOPBACK_FLAG;
-}
-
 static uint32_t packet_tx_stub(const nrf_mesh_tx_params_t * p_tx_params, uint32_t * const p_ref, int num_calls)
 {
     tx_evt_t tx_evt;
@@ -453,64 +373,9 @@ static uint32_t address_get_stub(dsm_handle_t handle, nrf_mesh_address_t * p_add
     }
     else
     {
-        return NRF_ERROR_NOT_FOUND;
+        TEST_FAIL_MESSAGE("Invalid address handle");
+        return NRF_SUCCESS; /*lint !e527 Unreachable code */
     }
-}
-
-static void retransmission_Expect(access_model_handle_t model_handle)
-{
-    access_publish_retransmit_t expected_publish_retransmit;
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_publish_retransmit_get(model_handle,
-                                                                       &expected_publish_retransmit));
-    access_publish_retransmission_message_add_mock_Expect(&expected_publish_retransmit);
-}
-
-static void access_publish_retransmission_message_add_stub(access_model_handle_t model_handle,
-                                                           const access_publish_retransmit_t *p_publish_retransmit,
-                                                           const access_message_tx_t *p_tx_message,
-                                                           const uint8_t *p_access_payload,
-                                                           uint16_t access_payload_length,
-                                                           int num_calls)
-{
-    UNUSED_VARIABLE(model_handle);
-    UNUSED_VARIABLE(p_tx_message);
-    UNUSED_VARIABLE(access_payload_length);
-    UNUSED_VARIABLE(num_calls);
-
-    access_publish_retransmit_t expected_publish_retransmit;
-    access_publish_retransmission_message_add_mock_Consume(&expected_publish_retransmit);
-
-    TEST_ASSERT_EQUAL_MEMORY(&expected_publish_retransmit,
-                             p_publish_retransmit,
-                             sizeof(access_publish_retransmit_t));
-
-    TEST_ASSERT(NULL != p_access_payload);
-
-    mesh_mem_free((uint8_t*) p_access_payload);
-}
-
-void * mesh_mem_alloc_mock(size_t size, int num_calls)
-{
-    UNUSED_VARIABLE(num_calls);
-
-    void* p_buffer = malloc(size);
-
-    uintptr_t expected_value = (uintptr_t) p_buffer;
-    mesh_mem_free_mock_Expect(&expected_value);
-
-    return p_buffer;
-}
-
-void mesh_mem_free_mock(void * ptr, int num_calls)
-{
-    UNUSED_VARIABLE(num_calls);
-
-    /* No way to check pointer here because of reordering malloc/free in
-     * the code */
-    uintptr_t expected_value;
-    mesh_mem_free_mock_Consume(&expected_value);
-
-    free(ptr);
 }
 
 static void publish_timeout_cb(access_model_handle_t handle, void * p_args)
@@ -529,9 +394,7 @@ static inline void expect_msg(access_opcode_t opcode, uint32_t ref, const uint8_
                               "Unable to push to expect_msg FIFO.");
 }
 
-static inline void expect_tx(const uint8_t * p_data, uint32_t length, uint16_t src, uint16_t dst,
-                             dsm_handle_t appkey_handle, dsm_handle_t subnet_handle,
-                             tx_secmat_type_t tx_secmat_type)
+static inline void expect_tx(const uint8_t * p_data, uint32_t length, uint16_t src, uint16_t dst, dsm_handle_t appkey_handle)
 {
     tx_evt_t tx_evt;
     tx_evt.p_data = p_data;
@@ -539,30 +402,11 @@ static inline void expect_tx(const uint8_t * p_data, uint32_t length, uint16_t s
     tx_evt.src = src;
     tx_evt.dst = dst;
 
-#if MESH_FEATURE_GATT_PROXY_ENABLED
-    proxy_is_enabled_ExpectAndReturn(true);
-#endif
     nrf_mesh_packet_send_StubWithCallback(packet_tx_stub);
     dsm_address_get_StubWithCallback(address_get_stub);
 
-    switch (tx_secmat_type)
-    {
-        case TX_SECMAT_TYPE_FRIENDSHIP:
-            dsm_tx_friendship_secmat_get_ExpectAndReturn(subnet_handle, appkey_handle, NULL,
-                                                         m_dsm_tx_friendship_secmat_get_retval);
-            dsm_tx_friendship_secmat_get_IgnoreArg_p_secmat();
-
-            if (NRF_ERROR_NOT_FOUND != m_dsm_tx_friendship_secmat_get_retval)
-            {
-                break;
-            }
-            /* fall through */
-        case TX_SECMAT_TYPE_MASTER:
-            dsm_tx_secmat_get_ExpectAndReturn(subnet_handle, appkey_handle, NULL, NRF_SUCCESS);
-            dsm_tx_secmat_get_IgnoreArg_p_secmat();
-            break;
-    }
-
+    dsm_tx_secmat_get_ExpectAndReturn(appkey_handle, NULL, NRF_SUCCESS);
+    dsm_tx_secmat_get_IgnoreArg_p_secmat();
     dsm_local_unicast_addresses_get_Expect(NULL);
     dsm_local_unicast_addresses_get_IgnoreArg_p_address();
     dsm_local_unicast_addresses_get_ReturnThruPtr_p_address(&local_addresses);
@@ -578,8 +422,8 @@ static uint32_t opcode_raw_write(access_opcode_t opcode, uint8_t * p_buffer)
         /* Make sure only 6-bit opcodes is used for vendor specific codes. */
         TEST_ASSERT_EQUAL_HEX16(0x00C0, (opcode.opcode & 0xFFC0));
         p_buffer[0] = opcode.opcode & 0x00FF;
-        p_buffer[1] = opcode.company_id & 0x00FF;
-        p_buffer[2] = (opcode.company_id >> 8) & 0x00FF;
+        p_buffer[1] = (opcode.company_id >> 8) & 0x00FF;
+        p_buffer[2] = opcode.company_id & 0x00FF;
         return 3;
     }
     else if ((opcode.opcode & 0xFF00) > 0)
@@ -615,8 +459,6 @@ static void send_msg(access_opcode_t opcode, const uint8_t * p_data, uint16_t le
     mesh_evt.params.message.secmat.p_net = NULL;
     mesh_evt.params.message.secmat.p_app = NULL;
 
-    dsm_address_is_rx_ExpectAndReturn(&mesh_evt.params.message.dst, true);
-
     if (dst < ACCESS_ELEMENT_COUNT)
     {
         mesh_evt.params.message.dst.type = NRF_MESH_ADDRESS_TYPE_UNICAST;
@@ -633,6 +475,7 @@ static void send_msg(access_opcode_t opcode, const uint8_t * p_data, uint16_t le
         dsm_address_handle_get_IgnoreArg_p_address();
         dsm_address_handle_get_IgnoreArg_p_address_handle();
         dsm_address_handle_get_ReturnThruPtr_p_address_handle(&dst);
+        dsm_address_subscription_get_ExpectAndReturn(dst, true);
     }
     else
     {
@@ -640,7 +483,6 @@ static void send_msg(access_opcode_t opcode, const uint8_t * p_data, uint16_t le
         TEST_FAIL_MESSAGE("Unknown handle");
     }
     dsm_appkey_handle_get_ExpectAndReturn(NULL, key_index);
-    dsm_subnet_handle_get_ExpectAndReturn(NULL, key_index);
 
     mp_evt_handler->evt_cb(&mesh_evt);
 }
@@ -662,29 +504,37 @@ static void opcode_handler(access_model_handle_t handle, const access_message_rx
     reply.opcode.company_id = ACCESS_COMPANY_ID_NONE;
     reply.p_buffer = data;
     reply.length = sizeof(data);
-    reply.force_segmented = false;
-    reply.transmic_size = NRF_MESH_TRANSMIC_SIZE_DEFAULT;
     uint8_t expected_data[sizeof(data) + sizeof(uint32_t)];
     uint16_t length = opcode_raw_write(reply.opcode, expected_data);
     memcpy(&expected_data[length], data, sizeof(data));
     length += sizeof(data);
 
-    bool friendship_credentials_flag = false;
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_publish_friendship_credential_flag_get(handle, &friendship_credentials_flag));
+    dsm_address_handle_get_ExpectAnyArgsAndReturn(NRF_ERROR_NOT_FOUND);
 
-    /* Never loop back the response: */
-    dsm_address_is_rx_ExpectAndReturn(&p_message->meta_data.src, false);
-    expect_tx(expected_data,
-                length,
-                ELEMENT_ADDRESS_START + handle * ACCESS_ELEMENT_COUNT / ACCESS_MODEL_COUNT,
-                p_message->meta_data.src.value,
-                p_message->meta_data.appkey_handle,
-                p_message->meta_data.subnet_handle,
-                friendship_credentials_flag ? TX_SECMAT_TYPE_FRIENDSHIP : TX_SECMAT_TYPE_MASTER);
+    /* If the received packet is a loopbacked packet, the reply will not be sent on the air: */
+    if (p_message->length == strlen("loopback") && memcmp(p_message->p_data, "loopback", strlen("loopback")) == 0)
+    {
+        /* First call is for the transmission of the reply: */
+        dsm_local_unicast_addresses_get_Expect(NULL);
+        dsm_local_unicast_addresses_get_IgnoreArg_p_address();
+        dsm_local_unicast_addresses_get_ReturnThruPtr_p_address(&local_addresses);
+
+        /* Second call is for the reception of the reply: */
+        dsm_local_unicast_addresses_get_Expect(NULL);
+        dsm_local_unicast_addresses_get_IgnoreArg_p_address();
+        dsm_local_unicast_addresses_get_ReturnThruPtr_p_address(&local_addresses);
+    }
+    else
+    {
+        expect_tx(expected_data,
+                  length,
+                  ELEMENT_ADDRESS_START + handle * ACCESS_ELEMENT_COUNT / ACCESS_MODEL_COUNT,
+                  p_message->meta_data.src.value,
+                  p_message->meta_data.appkey_handle);
+    }
 
     TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_reply(handle, p_message, &reply));
 }
-
 
 /*******************************************************************************
  * Test Setup
@@ -735,7 +585,6 @@ void build_device_setup(uint32_t elem_count, uint32_t model_count)
             TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_application_bind(handle, 0));
             TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_publish_application_set(handle, 0));
             TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_publish_address_set(handle, ACCESS_ELEMENT_COUNT + handle));
-
             if (handle == (ACCESS_MODEL_COUNT - 1))
             {
                 /* We compile the test with one list less than the number of models. */
@@ -745,14 +594,6 @@ void build_device_setup(uint32_t elem_count, uint32_t model_count)
             {
                 TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_subscription_list_alloc(handle));
             }
-
-            access_publish_retransmit_t publish_retransmit =
-            {
-                .count = 1,
-                .interval_steps = 1,
-            };
-            TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_publish_retransmit_set(handle, publish_retransmit));
-
             init_params.model_id.model_id++;
         }
 
@@ -788,16 +629,9 @@ void setUp(void)
     flash_manager_mock_Init();
     nrf_mesh_mock_Init();
     nrf_mesh_events_mock_Init();
-    nrf_mesh_utils_mock_Init();
     event_mock_Init();
     bearer_event_mock_Init();
     access_publish_mock_Init();
-    access_publish_retransmission_mock_Init();
-    proxy_mock_Init();
-    flash_manager_entries_read_mock_Init();
-    mesh_mem_mock_Init();
-    access_publish_retransmission_message_add_mock_Init();
-    mesh_mem_free_mock_Init();
 
     __LOG_INIT(0xFFFFFFFF, LOG_LEVEL_REPORT, LOG_CALLBACK_DEFAULT);
     memset(&m_msg_fifo, 0, sizeof(m_msg_fifo));
@@ -817,21 +651,13 @@ void setUp(void)
     m_flash_manager_calls = 0;
     m_listener_register_calls = 0;
 
-    mesh_mem_alloc_StubWithCallback(mesh_mem_alloc_mock);
-    mesh_mem_free_StubWithCallback(mesh_mem_free_mock);
-
     nrf_mesh_evt_handler_add_StubWithCallback(evt_handler_add_stub);
     dsm_flash_area_get_StubWithCallback(dsm_flash_area_get_stub);
     flash_manager_mem_listener_register_StubWithCallback(flash_manager_mem_listener_register_stub);
     flash_manager_add_StubWithCallback(flash_manager_add_stub);
-    bearer_event_flag_add_StubWithCallback(bearer_event_flag_add_cb);
-    access_publish_retransmission_message_add_StubWithCallback(access_publish_retransmission_message_add_stub);
     access_reliable_init_Expect();
     access_publish_init_Expect();
-    access_publish_retransmission_init_Expect();
     access_init();
-
-    m_dsm_tx_friendship_secmat_get_retval = NRF_SUCCESS;
 }
 
 void tearDown(void)
@@ -852,24 +678,12 @@ void tearDown(void)
     nrf_mesh_mock_Destroy();
     nrf_mesh_events_mock_Verify();
     nrf_mesh_events_mock_Destroy();
-    nrf_mesh_utils_mock_Verify();
-    nrf_mesh_utils_mock_Destroy();
     event_mock_Verify();
     event_mock_Destroy();
     bearer_event_mock_Verify();
     bearer_event_mock_Destroy();
     access_publish_mock_Verify();
     access_publish_mock_Destroy();
-    proxy_mock_Verify();
-    proxy_mock_Destroy();
-    flash_manager_entries_read_mock_Verify();
-    flash_manager_entries_read_mock_Destroy();
-    mesh_mem_mock_Verify();
-    mesh_mem_mock_Destroy();
-    access_publish_retransmission_message_add_mock_Verify();
-    access_publish_retransmission_message_add_mock_Destroy();
-    mesh_mem_free_mock_Verify();
-    mesh_mem_free_mock_Destroy();
 }
 
 
@@ -884,10 +698,13 @@ void test_model_add(void)
     init_params.element_index = 0;
     init_params.model_id.model_id = TEST_MODEL_ID;
     init_params.model_id.company_id = ACCESS_COMPANY_ID_NONE;
-    init_params.p_opcode_handlers = &m_opcode_handlers[0][0];
+    init_params.p_opcode_handlers = NULL;
     init_params.opcode_count = 0;
     init_params.p_args = TEST_REFERENCE;
     init_params.publish_timeout_cb = NULL;
+
+    TEST_ASSERT_EQUAL(NRF_ERROR_NULL, access_model_add(&init_params, &handle));
+    init_params.p_opcode_handlers = &m_opcode_handlers[0][0];
     TEST_ASSERT_EQUAL(NRF_ERROR_NULL, access_model_add(&init_params, NULL));
     TEST_ASSERT_EQUAL(NRF_ERROR_NULL, access_model_add(NULL, &handle));
     TEST_ASSERT_EQUAL(NRF_ERROR_INVALID_LENGTH, access_model_add(&init_params, &handle));
@@ -923,51 +740,10 @@ void test_model_add(void)
     init_params.element_index = ACCESS_ELEMENT_COUNT;
     TEST_ASSERT_EQUAL(NRF_ERROR_NOT_FOUND, access_model_add(&init_params, &handle));
 
-    /* There should be one free spot at the end now. Test, opcode count zero does not work when
-     * handlers are present. */
+    /* There should be one free spot at the end now. */
     init_params.element_index = ACCESS_ELEMENT_COUNT - 1;
-    init_params.opcode_count = 0;
-    TEST_ASSERT_EQUAL(NRF_ERROR_INVALID_LENGTH, access_model_add(&init_params, &handle));
-    init_params.opcode_count = 1;
-    init_params.p_opcode_handlers = NULL;
-    TEST_ASSERT_EQUAL(NRF_ERROR_NULL, access_model_add(&init_params, &handle));
-    init_params.p_opcode_handlers =  &m_opcode_handlers[ACCESS_MODEL_COUNT-1][0];
     TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_add(&init_params, &handle));
     TEST_ASSERT_EQUAL(ACCESS_MODEL_COUNT-1, handle);
-
-}
-
-void test_access_model_element_index_get(void)
-{
-    access_model_handle_t handle;
-    access_model_add_params_t init_params;
-    uint16_t element_idx;
-
-    for (uint32_t i = 0; i < OPCODE_COUNT; ++i)
-    {
-        m_opcode_handlers[0][i].opcode.opcode = i + ACCESS_MODEL_COUNT;
-        m_opcode_handlers[0][i].opcode.company_id = ACCESS_COMPANY_ID_NONE;
-    }
-
-    init_params.element_index = ACCESS_ELEMENT_COUNT-1;
-    init_params.model_id.model_id = TEST_MODEL_ID;
-    init_params.model_id.company_id = ACCESS_COMPANY_ID_NONE;
-    init_params.p_opcode_handlers = &m_opcode_handlers[0][0];
-    init_params.opcode_count = OPCODE_COUNT;
-    init_params.p_args = TEST_REFERENCE;
-    init_params.publish_timeout_cb = NULL;
-
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_add(&init_params, &handle));
-
-    /* Test null input */
-    TEST_ASSERT_EQUAL(NRF_ERROR_NULL, access_model_element_index_get(handle, NULL));
-
-    /* Test invalid model handle */
-    TEST_ASSERT_EQUAL(NRF_ERROR_NOT_FOUND, access_model_element_index_get(handle + 1, &element_idx));
-
-    /* Test correct behaviour */
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_element_index_get(handle, &element_idx));
-    TEST_ASSERT_EQUAL(init_params.element_index, element_idx);
 }
 
 void test_rx_tx(void)
@@ -994,7 +770,6 @@ void test_rx_tx(void)
                 access_reliable_message_rx_cb_IgnoreArg_p_message();
                 /* TODO: CMock tries to compare the location where p_args points to :( */
                 access_reliable_message_rx_cb_IgnoreArg_p_args();
-
                 send_msg(opcode, data, data_length, i, 0);
             }
         }
@@ -1014,34 +789,6 @@ void test_rx_tx(void)
 
     TEST_ASSERT_EQUAL(NRF_ERROR_NOT_FOUND, access_model_subscription_add(ACCESS_MODEL_COUNT, ACCESS_ELEMENT_COUNT + ACCESS_MODEL_COUNT));
     TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_subscription_add(0, ACCESS_ELEMENT_COUNT + ACCESS_MODEL_COUNT));
-
-    /* Test reply with friendship secmat */
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_publish_friendship_credential_flag_set(0, true));
-
-    void * p_args = ((uint32_t *)TEST_REFERENCE);
-    opcode.opcode = m_opcode_handlers[0][0].opcode.opcode;
-    expect_msg(opcode, (uint32_t)p_args, data, data_length);
-    access_reliable_message_rx_cb_Expect(0, NULL, NULL);
-    access_reliable_message_rx_cb_IgnoreArg_p_message();
-    access_reliable_message_rx_cb_IgnoreArg_p_args();
-
-    opcode.opcode = m_opcode_handlers[0][0].opcode.opcode;
-    send_msg(opcode, data, data_length, 0, 0);
-
-    /* Test reply with friendship secmat
-     *
-     * The Mesh Profile Specification v1.0, Section 4.2.2.4:
-     *
-     * When Publish Friendship Credential Flag is set to 1 and the friendship security material is
-     * not available, the master security material shall be used. */
-    m_dsm_tx_friendship_secmat_get_retval = NRF_ERROR_NOT_FOUND;
-    expect_msg(opcode, (uint32_t)p_args, data, data_length);
-
-    access_reliable_message_rx_cb_Expect(0, NULL, NULL);
-    access_reliable_message_rx_cb_IgnoreArg_p_message();
-    access_reliable_message_rx_cb_IgnoreArg_p_args();
-
-    send_msg(opcode, data, data_length, 0, 0);
 }
 
 void test_unicast_loopback(void)
@@ -1074,20 +821,13 @@ void test_unicast_loopback(void)
 
     /* Set publish address to the element's own address: */
     nrf_mesh_address_t destination = { NRF_MESH_ADDRESS_TYPE_UNICAST, ELEMENT_ADDRESS_START, NULL };
-    dsm_address_get_StubWithCallback(address_get_stub);
+    dsm_address_get_ExpectAndReturn(0, NULL, NRF_SUCCESS);
+    dsm_address_get_IgnoreArg_p_address();
+    dsm_address_get_ReturnThruPtr_p_address(&destination);
     access_reliable_message_rx_cb_ExpectAnyArgs();
-
-    bearer_event_flag_set_Expect(ACCESS_LOOPBACK_FLAG);
-    dsm_address_is_rx_ExpectAndReturn(&destination, true); // accept loopback
-
-    /* Check re-transmission */
-    retransmission_Expect(0);
+    expect_msg(opcode, (uint32_t) TEST_REFERENCE, data, data_length);
 
     TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_publish(0, &message));
-
-    dsm_address_is_rx_ExpectAndReturn(&destination, true); // called again in the bearer cb, as we created a loopback context.
-    expect_msg(opcode, (uint32_t) TEST_REFERENCE, data, data_length);
-    m_bearer_cb();
 }
 
 void test_group_loopback(void)
@@ -1110,26 +850,18 @@ void test_group_loopback(void)
         .length = data_length
     };
 
-    dsm_address_get_StubWithCallback(address_get_stub);
+    dsm_address_subscription_get_ExpectAndReturn(address_handle, true);
 
     dsm_address_handle_get_ExpectAnyArgsAndReturn(NRF_SUCCESS);
     dsm_address_handle_get_ReturnThruPtr_p_address_handle(&address_handle);
+    dsm_address_subscription_get_ExpectAndReturn(address_handle, true);
 
-    bearer_event_flag_set_Expect(ACCESS_LOOPBACK_FLAG);
-    dsm_address_is_rx_ExpectAndReturn(&m_addresses[address_handle], true); // accept loopback
+    expect_msg(opcode, (uint32_t) TEST_REFERENCE, data, data_length);
 
-    // still expect a TX, as the loopback doesn't prevent it when sending to a group address:
     const uint8_t raw_packet_data[] = "\x00loopback";
-    expect_tx(raw_packet_data, data_length + 1 /* opcode */, ELEMENT_ADDRESS_START, m_addresses[address_handle].value, 0, DSM_HANDLE_INVALID, TX_SECMAT_TYPE_MASTER);
-
-    /* Check re-transmission */
-    retransmission_Expect(0);
+    expect_tx(raw_packet_data, data_length + 1 /* opcode */, ELEMENT_ADDRESS_START, m_addresses[address_handle].value, 0);
 
     TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_publish(0, &message));
-
-    dsm_address_is_rx_ExpectAndReturn(&m_addresses[address_handle], true); // called again in the bearer cb, as we created a loopback context.
-    expect_msg(opcode, (uint32_t) TEST_REFERENCE, data, data_length);
-    m_bearer_cb();
 }
 
 void test_virtual_loopback(void)
@@ -1142,6 +874,7 @@ void test_virtual_loopback(void)
     dsm_handle_t address_handle = ACCESS_ELEMENT_COUNT + ACCESS_MODEL_COUNT + 1;
 
     /* Replace the current address in the address array with a virtual address: */
+    nrf_mesh_address_t temp = m_addresses[address_handle];
     const uint8_t label_uuid[] = { 0xf4, 0xa0, 0x02, 0xc7, 0xfb, 0x1e, 0x4c, 0xa0, 0xa4, 0x69, 0xa0, 0x21, 0xde, 0x0d, 0xb8, 0x75 };
     m_addresses[address_handle].type = NRF_MESH_ADDRESS_TYPE_VIRTUAL;
     m_addresses[address_handle].value = 0x9736;
@@ -1158,26 +891,21 @@ void test_virtual_loopback(void)
         .length = data_length
     };
 
-    dsm_address_get_StubWithCallback(address_get_stub);
+    dsm_address_subscription_get_ExpectAndReturn(address_handle, true);
 
     dsm_address_handle_get_ExpectAnyArgsAndReturn(NRF_SUCCESS);
     dsm_address_handle_get_ReturnThruPtr_p_address_handle(&address_handle);
+    dsm_address_subscription_get_ExpectAndReturn(address_handle, true);
 
-    bearer_event_flag_set_Expect(ACCESS_LOOPBACK_FLAG);
-    dsm_address_is_rx_ExpectAndReturn(&m_addresses[address_handle], true); // accept loopback
+    expect_msg(opcode, (uint32_t) TEST_REFERENCE, data, data_length);
 
-    // still expect a TX, as the loopback doesn't prevent it when sending to a group address:
     const uint8_t raw_packet_data[] = "\x00loopback";
-    expect_tx(raw_packet_data, data_length + 1 /* opcode */, ELEMENT_ADDRESS_START, m_addresses[address_handle].value, 0, DSM_HANDLE_INVALID, TX_SECMAT_TYPE_MASTER);
-
-    /* Check re-transmission */
-    retransmission_Expect(0);
+    expect_tx(raw_packet_data, data_length + 1 /* opcode */, ELEMENT_ADDRESS_START, m_addresses[address_handle].value, 0);
 
     TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_publish(0, &message));
 
-    dsm_address_is_rx_ExpectAndReturn(&m_addresses[address_handle], true); // called again in the bearer cb, as we created a loopback context.
-    expect_msg(opcode, (uint32_t) TEST_REFERENCE, data, data_length);
-    m_bearer_cb();
+    /* Restore the previous address to the address array: */
+    m_addresses[address_handle] = temp;
 }
 
 void test_key_access(void)
@@ -1236,10 +964,7 @@ void test_group_addressing(void)
     }
 }
 
-typedef uint32_t (publication_cb)(access_model_handle_t handle,
-                                    access_message_tx_t *p_tx_message);
-
-static void publication_tests(publication_cb *p_pub_func, bool with_retransmission)
+void test_model_publish(void)
 {
     access_message_tx_t message;
     const uint8_t data[] = "Hello, World";
@@ -1249,16 +974,18 @@ static void publication_tests(publication_cb *p_pub_func, bool with_retransmissi
     message.opcode.company_id =opcodes[0].company_id;
     message.p_buffer = data;
     message.length = sizeof(data);
-    message.force_segmented = false;
-    message.transmic_size = NRF_MESH_TRANSMIC_SIZE_DEFAULT;
 
-    TEST_ASSERT_EQUAL(NRF_ERROR_NOT_FOUND, p_pub_func(ACCESS_MODEL_COUNT, &message));
-    TEST_ASSERT_EQUAL(NRF_ERROR_NOT_FOUND, p_pub_func(0, &message));
+    TEST_ASSERT_EQUAL(NRF_ERROR_NULL, access_model_publish(0, NULL));
+    TEST_ASSERT_EQUAL(NRF_ERROR_NOT_FOUND, access_model_publish(ACCESS_MODEL_COUNT, &message));
+    TEST_ASSERT_EQUAL(NRF_ERROR_NOT_FOUND, access_model_publish(0, &message));
     build_device_setup(ACCESS_ELEMENT_COUNT, ACCESS_MODEL_COUNT);
 
+    message.length = ACCESS_MESSAGE_LENGTH_MAX;
+    TEST_ASSERT_EQUAL(NRF_ERROR_INVALID_LENGTH, access_model_publish(0, &message));
+    message.length = sizeof(data);
     message.opcode.opcode = 0x7f;
-    TEST_ASSERT_EQUAL(NRF_ERROR_INVALID_PARAM, p_pub_func(0, &message));
-    TEST_ASSERT_EQUAL(NRF_ERROR_INVALID_PARAM, p_pub_func(0, &message));
+    TEST_ASSERT_EQUAL(NRF_ERROR_INVALID_PARAM, access_model_publish(0, &message));
+    TEST_ASSERT_EQUAL(NRF_ERROR_INVALID_PARAM, access_model_publish(0, &message));
 
     for (uint32_t i = 0; i < ACCESS_MODEL_COUNT; ++i)
     {
@@ -1274,267 +1001,9 @@ static void publication_tests(publication_cb *p_pub_func, bool with_retransmissi
         uint32_t length = opcode_raw_write(message.opcode, expected_data);
         memcpy(&expected_data[length], data, message.length);
         length += message.length;
-        nrf_mesh_address_t dst_addr = {NRF_MESH_ADDRESS_TYPE_UNICAST, dst};
-        dsm_address_is_rx_ExpectAndReturn(&dst_addr, false); // don't want loopback
+        expect_tx(expected_data, length, src, dst, 0);
 
-        expect_tx(expected_data, length, src, dst, 0, DSM_HANDLE_INVALID, TX_SECMAT_TYPE_MASTER);
-
-        if (with_retransmission)
-        {
-            /* Check re-transmission */
-            retransmission_Expect(i);
-        }
-
-        TEST_ASSERT_EQUAL(NRF_SUCCESS, p_pub_func(i, &message));
-    }
-
-    /* Test with frienship secmat */
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_publish_friendship_credential_flag_set(0, true));
-
-    message.opcode.opcode = opcodes[0].opcode;
-    message.opcode.company_id =opcodes[0].company_id;
-    message.p_buffer = data;
-    message.length = sizeof(data);
-
-    uint16_t src = ELEMENT_ADDRESS_START;
-    uint16_t dst = PUBLISH_ADDRESS_START;
-
-    uint8_t expected_data[sizeof(data) + sizeof(uint32_t)];
-    uint32_t length = opcode_raw_write(message.opcode, expected_data);
-    memcpy(&expected_data[length], data, message.length);
-    length += message.length;
-    nrf_mesh_address_t dst_addr = {NRF_MESH_ADDRESS_TYPE_UNICAST, dst};
-    dsm_address_is_rx_ExpectAndReturn(&dst_addr, false); // don't want loopback
-
-    expect_tx(expected_data, length, src, dst, 0, DSM_HANDLE_INVALID, TX_SECMAT_TYPE_FRIENDSHIP);
-
-    if (with_retransmission)
-    {
-        /* Check re-transmission */
-        retransmission_Expect(0);
-    }
-
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, p_pub_func(0, &message));
-
-    /* Test with frienship secmat
-     *
-     * The Mesh Profile Specification v1.0, Section 4.2.2.4:
-     *
-     * When Publish Friendship Credential Flag is set to 1 and the friendship security material is
-     * not available, the master security material shall be used. */
-    m_dsm_tx_friendship_secmat_get_retval = NRF_ERROR_NOT_FOUND;
-    dsm_address_is_rx_ExpectAndReturn(&dst_addr, false); // don't want loopback
-    expect_tx(expected_data, length, src, dst, 0, DSM_HANDLE_INVALID, TX_SECMAT_TYPE_FRIENDSHIP);
-
-    if (with_retransmission)
-    {
-        /* Check re-transmission */
-        retransmission_Expect(0);
-    }
-
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, p_pub_func(0, &message));
-}
-
-static uint32_t access_model_publish_publication_cb(access_model_handle_t handle,
-                                                    access_message_tx_t *p_tx_message)
-{
-    return access_model_publish(handle, p_tx_message);
-}
-
-static uint32_t access_packet_tx_publication_cb(access_model_handle_t handle,
-                                                access_message_tx_t *p_tx_message)
-{
-    /* Prepare access payload */
-    uint16_t opcode_length = access_utils_opcode_size_get(p_tx_message->opcode);
-    uint16_t payload_length = opcode_length + p_tx_message->length;
-    uint8_t payload[payload_length];
-
-    opcode_raw_write(p_tx_message->opcode, payload);
-    memcpy(&payload[opcode_length], p_tx_message->p_buffer, p_tx_message->length);
-
-    return access_packet_tx(handle, p_tx_message, payload, payload_length);
-}
-
-void test_access_model_publish(void)
-{
-    TEST_ASSERT_EQUAL(NRF_ERROR_NULL, access_model_publish(0, NULL));
-
-    access_message_tx_t message;
-    message.length = ACCESS_MESSAGE_LENGTH_MAX;
-    TEST_ASSERT_EQUAL(NRF_ERROR_INVALID_LENGTH, access_model_publish(0, &message));
-
-    publication_tests(access_model_publish_publication_cb, true);
-}
-
-void test_access_packet_tx(void)
-{
-    const uint8_t data[] = "Hello, World";
-    const access_opcode_t opcode = ACCESS_OPCODE_SIG(0x0040);
-    access_message_tx_t message;
-    message.opcode.opcode = opcode.opcode;
-    message.opcode.company_id = opcode.company_id;
-    message.p_buffer = data;
-    message.length = sizeof(data);
-    message.force_segmented = false;
-    message.transmic_size = NRF_MESH_TRANSMIC_SIZE_DEFAULT;
-
-    TEST_ASSERT_EQUAL(NRF_ERROR_NULL, access_packet_tx(0, NULL, data, sizeof(data)));
-    TEST_ASSERT_EQUAL(NRF_ERROR_NULL, access_packet_tx(0, &message, NULL, sizeof(data)));
-    TEST_ASSERT_EQUAL(NRF_ERROR_NULL, access_packet_tx(0, &message, data, 0));
-
-    message.length = ACCESS_MESSAGE_LENGTH_MAX;
-    TEST_ASSERT_EQUAL(NRF_ERROR_INVALID_LENGTH, access_model_publish(0, &message));
-
-    publication_tests(access_packet_tx_publication_cb, false);
-}
-
-void test_publish_retransmit(void)
-{
-    access_publish_retransmit_t publish_retransmit_out = {};
-    access_publish_retransmit_t publish_retransmit_in;
-    publish_retransmit_in.count = 0;
-    publish_retransmit_in.interval_steps = 1;
-
-    TEST_ASSERT_EQUAL(NRF_ERROR_NOT_FOUND, access_model_publish_retransmit_set(0, publish_retransmit_in));
-    TEST_ASSERT_EQUAL(NRF_ERROR_NULL, access_model_publish_retransmit_get(0, NULL));
-    TEST_ASSERT_EQUAL(NRF_ERROR_NOT_FOUND, access_model_publish_retransmit_get(0, &publish_retransmit_out));
-
-    build_device_setup(ACCESS_ELEMENT_COUNT, ACCESS_MODEL_COUNT);
-
-    TEST_ASSERT_EQUAL(NRF_ERROR_NOT_FOUND, access_model_publish_retransmit_set(ACCESS_HANDLE_INVALID, publish_retransmit_in));
-    TEST_ASSERT_EQUAL(NRF_ERROR_NOT_FOUND, access_model_publish_retransmit_get(ACCESS_HANDLE_INVALID, &publish_retransmit_out));
-
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_publish_retransmit_set(0, publish_retransmit_in));
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_publish_retransmit_get(0, &publish_retransmit_out));
-
-    TEST_ASSERT_EQUAL_MEMORY(&publish_retransmit_in,
-                             &publish_retransmit_out,
-                             sizeof(access_publish_retransmit_t));
-
-    /* Test retransmission called */
-    const uint8_t data[] = "Hello, World";
-    const access_opcode_t opcode = ACCESS_OPCODE_SIG(0x0040);
-    access_message_tx_t message;
-    message.opcode.opcode = opcode.opcode;
-    message.opcode.company_id = opcode.company_id;
-    message.p_buffer = data;
-    message.length = sizeof(data);
-    message.force_segmented = false;
-    message.transmic_size = NRF_MESH_TRANSMIC_SIZE_DEFAULT;
-
-    publish_retransmit_in.count = 2;
-
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_publish_retransmit_set(0, publish_retransmit_in));
-    retransmission_Expect(0);
-
-    uint16_t src = ELEMENT_ADDRESS_START;
-    uint16_t dst = PUBLISH_ADDRESS_START;
-
-    uint8_t expected_data[sizeof(data) + sizeof(uint32_t)];
-    uint32_t length = opcode_raw_write(message.opcode, expected_data);
-    memcpy(&expected_data[length], data, message.length);
-    length += message.length;
-    nrf_mesh_address_t dst_addr = {NRF_MESH_ADDRESS_TYPE_UNICAST, dst};
-    dsm_address_is_rx_ExpectAndReturn(&dst_addr, false); // don't want loopback
-
-    expect_tx(expected_data, length, src, dst, 0, DSM_HANDLE_INVALID, TX_SECMAT_TYPE_MASTER);
-
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_publish(0, &message));
-
-    /* No retransmit, free shall be called */
-    publish_retransmit_in.count = 0;
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_publish_retransmit_set(0, publish_retransmit_in));
-
-    dsm_address_is_rx_ExpectAndReturn(&dst_addr, false); // don't want loopback
-    expect_tx(expected_data, length, src, dst, 0, DSM_HANDLE_INVALID, TX_SECMAT_TYPE_MASTER);
-
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_publish(0, &message));
-}
-
-void test_against_spec_messages(void)
-{
-    access_opcode_handler_t opcode_handlers[] =
-    {
-        {ACCESS_OPCODE_VENDOR(MSG_21_VENDOR_MODEL_OPCODE, MSG_21_VENDOR_MODEL_COMPANY_ID), opcode_handler},
-    };
-
-    access_model_handle_t model_handle;
-    access_model_add_params_t init_params;
-    init_params.model_id.model_id = TEST_MODEL_ID;
-    init_params.model_id.company_id = MSG_21_VENDOR_MODEL_COMPANY_ID;
-    init_params.p_opcode_handlers = NULL;
-    init_params.opcode_count = 0;
-    init_params.p_args = NULL;
-    init_params.publish_timeout_cb = NULL;
-    init_params.p_opcode_handlers = &opcode_handlers[0];
-    init_params.opcode_count = sizeof(opcode_handlers) / sizeof(opcode_handlers[0]);
-    init_params.p_args = 0;
-    init_params.element_index = 0;
-
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_add(&init_params, &model_handle));
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_application_bind(model_handle, 0));
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_publish_application_set(model_handle, 0));
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_publish_address_set(model_handle, ACCESS_ELEMENT_COUNT + model_handle));
-
-    uint8_t access_params[] = MSG_21_ACCESS_PARAMS_RAW;
-    uint8_t access_payload[] = MSG_21_ACCESS_PAYLOAD_RAW;
-
-    /* Test tx */
-    {
-
-        access_message_tx_t message;
-        message.opcode.opcode = MSG_21_VENDOR_MODEL_OPCODE;
-        message.opcode.company_id = MSG_21_VENDOR_MODEL_COMPANY_ID;
-        message.p_buffer = access_params;
-        message.length = sizeof(access_params);
-        message.force_segmented = false;
-        message.transmic_size = NRF_MESH_TRANSMIC_SIZE_DEFAULT;
-
-        uint16_t src = ELEMENT_ADDRESS_START;
-        uint16_t dst = PUBLISH_ADDRESS_START;
-
-        nrf_mesh_address_t dst_addr = {NRF_MESH_ADDRESS_TYPE_UNICAST, dst, NULL};
-
-        dsm_address_is_rx_ExpectAndReturn(&dst_addr, false); // don't want loopback
-
-        expect_tx(access_payload, sizeof(access_payload), src, dst, 0, DSM_HANDLE_INVALID, false);
-
-        TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_publish(0, &message));
-    }
-
-    /* Test rx */
-    {
-        expect_msg(opcode_handlers[0].opcode, 0, access_params, sizeof(access_params));
-
-        /* Send on element address handle. */
-        access_reliable_message_rx_cb_Expect(model_handle, NULL, 0);
-        access_reliable_message_rx_cb_IgnoreArg_p_message();
-        access_reliable_message_rx_cb_IgnoreArg_p_args();
-
-        nrf_mesh_rx_metadata_t metadata;
-        memset(&metadata, 0, sizeof(metadata));
-
-        nrf_mesh_evt_t mesh_evt;
-        memset(&mesh_evt, 0, sizeof(mesh_evt));
-        mesh_evt.params.message.p_metadata = &metadata;
-        mesh_evt.type = NRF_MESH_EVT_MESSAGE_RECEIVED;
-        mesh_evt.params.message.p_buffer = access_payload;
-        mesh_evt.params.message.length = sizeof(access_payload);
-        mesh_evt.params.message.src.type = NRF_MESH_ADDRESS_TYPE_UNICAST;
-        mesh_evt.params.message.src.value= SOURCE_ADDRESS;
-        mesh_evt.params.message.secmat.p_net = NULL;
-        mesh_evt.params.message.secmat.p_app = NULL;
-        mesh_evt.params.message.dst.type = NRF_MESH_ADDRESS_TYPE_UNICAST;
-        mesh_evt.params.message.dst.value = ELEMENT_ADDRESS_START;
-
-        dsm_address_is_rx_ExpectAndReturn(&mesh_evt.params.message.dst, true);
-        dsm_local_unicast_addresses_get_Expect(NULL);
-        dsm_local_unicast_addresses_get_IgnoreArg_p_address();
-        dsm_local_unicast_addresses_get_ReturnThruPtr_p_address(&local_addresses);
-        dsm_appkey_handle_get_ExpectAndReturn(NULL, 0);
-        dsm_subnet_handle_get_ExpectAndReturn(NULL, 0);
-
-        mp_evt_handler->evt_cb(&mesh_evt);
+        TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_publish(i, &message));
     }
 }
 
@@ -1589,16 +1058,6 @@ void test_error_conditions(void)
     tx_message.opcode.company_id = 0x1337;
     TEST_ASSERT_EQUAL(NRF_ERROR_INVALID_PARAM, access_model_reply(0,&rx_message, &tx_message));
 
-    /* Allocation test */
-    tx_message.opcode.opcode = 0x00;
-    tx_message.opcode.company_id = ACCESS_COMPANY_ID_NONE;
-    mesh_mem_alloc_StubWithCallback(NULL);
-    mesh_mem_alloc_ExpectAnyArgsAndReturn(NULL);
-    TEST_ASSERT_EQUAL(NRF_ERROR_NO_MEM, access_model_publish(0, &tx_message));
-    mesh_mem_alloc_ExpectAnyArgsAndReturn(NULL);
-    TEST_ASSERT_EQUAL(NRF_ERROR_NO_MEM, access_model_reply(0, &rx_message, &tx_message));
-    mesh_mem_alloc_StubWithCallback(mesh_mem_alloc_mock);
-
     const dsm_handle_t ADDRESS_COUNT = ACCESS_ELEMENT_COUNT + ACCESS_MODEL_COUNT + SUBSCRIPTION_ADDRESS_COUNT;
     TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_subscription_add(0, ADDRESS_COUNT-1));
     TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_application_bind(0, DSM_APP_MAX + DSM_DEVICE_MAX-1));
@@ -1634,11 +1093,6 @@ void test_settergetter(void)
     TEST_ASSERT_EQUAL(NRF_ERROR_NOT_FOUND, access_model_publish_address_get(ACCESS_MODEL_COUNT, &address_handle));
     TEST_ASSERT_EQUAL(NRF_ERROR_NOT_FOUND, access_model_publish_address_get(0, &address_handle));
     TEST_ASSERT_EQUAL(NRF_ERROR_NOT_FOUND, access_model_publish_address_get(0, &address_handle));
-
-
-    bool flag = 0;
-    TEST_ASSERT_EQUAL(NRF_ERROR_NOT_FOUND, access_model_publish_friendship_credential_flag_set(0, flag));
-    TEST_ASSERT_EQUAL(NRF_ERROR_NOT_FOUND, access_model_publish_friendship_credential_flag_get(ACCESS_MODEL_COUNT, &flag));
 
     uint8_t ttl = 0;
     TEST_ASSERT_EQUAL(NRF_ERROR_NOT_FOUND, access_model_publish_ttl_set(0, ttl));
@@ -1853,12 +1307,6 @@ void test_settergetter(void)
     ttl = 0;
     TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_publish_ttl_get(0, &ttl));
     TEST_ASSERT_EQUAL(NRF_MESH_TTL_MAX, ttl);
-
-    flag = 1;
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_publish_friendship_credential_flag_set(0, flag));
-    flag = 0;
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_publish_friendship_credential_flag_get(0, &flag));
-    TEST_ASSERT_EQUAL(1, flag);
 }
 
 void test_flash_load_reload(void)
@@ -1886,8 +1334,8 @@ void test_flash_load_reload(void)
     /*lint -save -e651 -e64 Disregard warnings about confusing initializers and type mismatches caused by the macros. */
     access_flash_test_struct_t test_vector[] =
     {
-        FLASH_TEST_VECTOR_INSTANCE(model_id1, 0, &addresses[0], 2, UINT32_MAX, 0xA, pub_period1, &appkeys[0], 3, 0x1, 4, 0),
-        FLASH_TEST_VECTOR_INSTANCE(model_id2, 1, &addresses[2], sizeof_addresses -2, 0, 0xC, pub_period2, &appkeys[3], sizeof_appkeys - 3, 0x0, 127, 1)
+        FLASH_TEST_VECTOR_INSTANCE(model_id1, 0, &addresses[0], 2, UINT32_MAX, 0xA, pub_period1, &appkeys[0], 3, 0x1, 4),
+        FLASH_TEST_VECTOR_INSTANCE(model_id2, 1, &addresses[2], sizeof_addresses -2, 0, 0xC, pub_period2, &appkeys[3], sizeof_appkeys - 3, 0x0, 127)
     };
     uint32_t test_vector_size = sizeof(test_vector)/sizeof(access_flash_test_struct_t);
     /*lint -restore */
@@ -1995,7 +1443,7 @@ void test_flash_load_reload(void)
     /* Add a new model to element 1 and allocate a new subscription list for it. */
     access_flash_test_struct_t new_test_case =
         FLASH_TEST_VECTOR_INSTANCE(model_id1, 1, &addresses[0], sizeof_addresses, UINT32_MAX,
-                                   0xA, pub_period1, &appkeys[0], 3, 0x1, 4, 0); /*lint !e64 Type mismatch. */
+                                   0xA, pub_period1, &appkeys[0], 3, 0x1, 4); /*lint !e64 Type mismatch. */
     access_model_handle_t new_test_case_model_handle = init_test_model_and_subs_list(&new_test_case);
     update_test_model(&new_test_case, new_test_case_model_handle, true);
     p_subs_flash_entry[1] = expect_flash_manager_entry(FLASH_GROUP_SUBS_LIST | 1, sizeof(access_flash_subscription_list_t));
@@ -2021,7 +1469,6 @@ void test_flash_load_reload(void)
     /********************************* Reset access and lose all data:*****************************/
     access_publish_init_Expect();
     access_reliable_init_Expect();
-    access_publish_retransmission_init_Expect();
     access_init();
     /* Check that elements are un populated */
     access_model_handle_t model_handles[ACCESS_MODEL_COUNT];
@@ -2032,18 +1479,14 @@ void test_flash_load_reload(void)
     TEST_ASSERT_EQUAL(NRF_SUCCESS, access_element_models_get(1, model_handles, &models_count));
     TEST_ASSERT_EQUAL(0, models_count);
 
-    /* If there is nothing stored, and the flash_manager returns not found for metadata we expect nothing to happen: */
-    uint32_t entry_length = sizeof(access_flash_metadata_t);
-    flash_manager_entry_read_ExpectAndReturn(mp_flash_manager, FLASH_HANDLE_METADATA, NULL, &entry_length, NRF_ERROR_NOT_FOUND);
-    flash_manager_entry_read_IgnoreArg_p_data();
+    /* If there is nothing stored, and the flash_manager returns a null for metadata we expect nothing to happen: */
+    flash_manager_entry_get_ExpectAndReturn(mp_flash_manager, FLASH_HANDLE_METADATA, NULL);
     TEST_ASSERT_FALSE(access_flash_config_load());
 
 
     /********************************* Restore access state from flash:*****************************/
     /* First read the metadata*/
-    flash_manager_entry_read_ExpectAndReturn(mp_flash_manager, FLASH_HANDLE_METADATA, NULL, &entry_length, NRF_SUCCESS);
-    flash_manager_entry_read_IgnoreArg_p_data();
-    flash_manager_entry_read_ReturnMemThruPtr_p_data(p_metadata_flash_entry->data, sizeof(access_flash_metadata_t));
+    flash_manager_entry_get_ExpectAndReturn(mp_flash_manager, FLASH_HANDLE_METADATA, p_metadata_flash_entry);
     /* Metadata is sane so subscriptionlist, elements, and models should be restored */
     fm_handle_filter_t subs_filter = {.mask = FLASH_HANDLE_FILTER_MASK, .match = FLASH_GROUP_SUBS_LIST};
     restore_flash(&subs_filter, p_subs_flash_entry, 2);
@@ -2121,7 +1564,6 @@ void test_flash_load_reload(void)
     /* Adding models before a restore is also accepted. */
     access_publish_init_Expect();
     access_reliable_init_Expect();
-    access_publish_retransmission_init_Expect();
     access_init();
     /* Add models first before restore*/
     access_model_handle_t reinit_handle;
@@ -2145,9 +1587,7 @@ void test_flash_load_reload(void)
     TEST_ASSERT_EQUAL(2, models_count);
 
     /* First read the metadata */
-    flash_manager_entry_read_ExpectAndReturn(mp_flash_manager, FLASH_HANDLE_METADATA, NULL, &entry_length, NRF_SUCCESS);
-    flash_manager_entry_read_IgnoreArg_p_data();
-    flash_manager_entry_read_ReturnMemThruPtr_p_data(p_metadata_flash_entry->data, sizeof(access_flash_metadata_t));
+    flash_manager_entry_get_ExpectAndReturn(mp_flash_manager, FLASH_HANDLE_METADATA, p_metadata_flash_entry);
     restore_flash(&subs_filter, p_subs_flash_entry, 2);
     restore_flash(&elem_filter, &p_element_flash_entry, 1);
     restore_flash(&model_filter, p_model_flash_entry, 3);
@@ -2189,9 +1629,7 @@ void test_flash_load_reload(void)
     /* Return unexpected metadata from flash, this should trigger wipe */
     p_metadata = (access_flash_metadata_t *) p_metadata_flash_entry->data;
     p_metadata->model_count--;
-    flash_manager_entry_read_ExpectAndReturn(mp_flash_manager, FLASH_HANDLE_METADATA, NULL, &entry_length, NRF_SUCCESS);
-    flash_manager_entry_read_IgnoreArg_p_data();
-    flash_manager_entry_read_ReturnMemThruPtr_p_data(p_metadata_flash_entry->data, sizeof(access_flash_metadata_t));
+    flash_manager_entry_get_ExpectAndReturn(mp_flash_manager, FLASH_HANDLE_METADATA, p_metadata_flash_entry);
     flash_manager_remove_ExpectAndReturn(mp_flash_manager, NRF_SUCCESS);
     TEST_ASSERT_FALSE(access_flash_config_load());
 
@@ -2269,131 +1707,3 @@ void test_flash_load_reload(void)
     bearer_event_critical_section_end_Expect();
     mp_mem_listener->callback(mp_mem_listener->p_args);
 }
-
-void test_subscription_dealloc_and_dealloc_share_combination(void)
-{
-    uint16_t i;
-
-    /* Ensure access layer is stable */
-    m_flash_manager_config.write_complete_cb(mp_flash_manager, NULL, FM_RESULT_SUCCESS);
-    printf("ACCESS_SUBSCRIPTION_LIST_COUNT: %d\n",ACCESS_SUBSCRIPTION_LIST_COUNT);
-
-    /* Allocate a model */
-    access_model_add_params_t init_params;
-    access_model_handle_t handle;
-    uint8_t model_count;
-    uint16_t dealloc_index;
-
-    for (i = 0; i < ACCESS_MODEL_COUNT; i++)
-    {
-        init_params.element_index = 0;
-        init_params.model_id.model_id = TEST_MODEL_ID + i;
-        init_params.model_id.company_id = ACCESS_COMPANY_ID_NONE;
-        init_params.p_opcode_handlers = &m_opcode_handlers[0][0];
-        init_params.opcode_count = OPCODE_COUNT;
-        init_params.p_args = TEST_REFERENCE;
-        init_params.publish_timeout_cb = publish_timeout_cb;
-
-        TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_add(&init_params, &handle));
-        TEST_ASSERT_EQUAL(i, handle);
-
-        TEST_ASSERT_EQUAL(NRF_SUCCESS, access_element_sig_model_count_get(0, &model_count));
-        TEST_ASSERT_EQUAL(i + 1, model_count);
-
-        /* Allocate subscription list for all, except first three, for testing purpose */
-        if (i > 2)
-        {
-            TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_subscription_list_alloc(handle));
-        }
-    }
-
-    init_params.model_id.model_id = TEST_MODEL_ID + i;
-    TEST_ASSERT_EQUAL(NRF_ERROR_NO_MEM, access_model_add(&init_params, &handle));
-
-    TEST_ASSERT_EQUAL(NRF_ERROR_NOT_SUPPORTED, access_model_subscription_add(0, 0));
-    TEST_ASSERT_EQUAL(NRF_ERROR_NOT_SUPPORTED, access_model_subscription_remove(0, 0));
-    TEST_ASSERT_EQUAL(NRF_ERROR_NOT_SUPPORTED, access_model_subscription_add(1, 0));
-    TEST_ASSERT_EQUAL(NRF_ERROR_NOT_SUPPORTED, access_model_subscription_remove(1, 0));
-    TEST_ASSERT_EQUAL(NRF_ERROR_INVALID_STATE, access_model_subscription_lists_share(0, 1));
-
-    /* Allocate subscription list for 0, and 1 */
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_subscription_list_alloc(0));
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_subscription_list_alloc(1));
-    TEST_ASSERT_EQUAL(NRF_ERROR_NO_MEM, access_model_subscription_list_alloc(2));
-
-    flash_manager_entry_count_get_IgnoreAndReturn(0);
-    /* Test: Share subscription list: owner:0, other:1, and then allocate for third one */
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_subscription_lists_share(0, 1));
-    dealloc_index = m_sub_list_dealloc_index;
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_subscription_list_alloc(2));
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_subscription_list_alloc(2));
-
-    /* Test: De-alloc subscription list of `2` multiple times and try reallocating it. */
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_subscription_list_dealloc(2));
-    TEST_ASSERT_EQUAL(dealloc_index, m_sub_list_dealloc_index);
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_subscription_list_alloc(2));
-
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_subscription_list_dealloc(2));
-    TEST_ASSERT_EQUAL(dealloc_index, m_sub_list_dealloc_index);
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_subscription_list_dealloc(2));
-    TEST_ASSERT_EQUAL(dealloc_index, m_sub_list_dealloc_index);
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_subscription_list_alloc(2));
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_subscription_list_alloc(2));
-
-    /* Test: De-alloc subscription list for owner:0, and try sharing */
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_subscription_list_dealloc(0));
-    dealloc_index = m_sub_list_dealloc_index;
-    TEST_ASSERT_EQUAL(NRF_ERROR_INVALID_STATE, access_model_subscription_lists_share(0, 1));
-
-    /* Test: Try Alloc subscription list for other:1 */
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_subscription_list_alloc(1));
-
-    /* Test: Try de-alloc for other:1, alloc subscription list for owner:0, and try sharing */
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_subscription_list_dealloc(1));
-    TEST_ASSERT_TRUE(dealloc_index == m_sub_list_dealloc_index);
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_subscription_list_alloc(0));
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_subscription_lists_share(0, 1));
-
-    /* Test: De-alloc subscription list for owner:0 and other:1 and try sharing */
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_subscription_list_dealloc(0));
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_subscription_list_dealloc(1));
-    TEST_ASSERT_TRUE(dealloc_index == m_sub_list_dealloc_index);
-    TEST_ASSERT_EQUAL(NRF_ERROR_INVALID_STATE, access_model_subscription_lists_share(0, 1));
-
-    /* Test: De-alloc fails, if subscription list entry is found in the flash */
-    uint8_t entry_buffer[UINT8_MAX];
-    fm_entry_t * p_entry = (fm_entry_t *) entry_buffer;
-
-    flash_manager_entry_count_get_IgnoreAndReturn(1);
-    TEST_ASSERT_EQUAL(NRF_ERROR_FORBIDDEN, access_model_subscription_list_dealloc(2));
-
-    /* Test: De-alloc fails, access is storing its data */
-    bearer_event_critical_section_begin_Expect();
-    bearer_event_critical_section_end_Expect();
-
-    flash_manager_entry_alloc_IgnoreAndReturn(p_entry);
-    for (uint32_t i = 0; i < ACCESS_SUBSCRIPTION_LIST_COUNT; i++)
-    {
-        flash_manager_entry_commit_Ignore();
-    }
-    for (uint32_t i = 0; i < ACCESS_ELEMENT_COUNT; i++)
-    {
-        flash_manager_entry_alloc_IgnoreAndReturn(p_entry);
-        flash_manager_entry_commit_Ignore();
-    }
-    for (uint32_t i = 0; i < ACCESS_MODEL_COUNT; i++)
-    {
-        flash_manager_entry_alloc_IgnoreAndReturn(p_entry);
-        flash_manager_entry_commit_Ignore();
-    }
-    flash_manager_mem_listener_register_Ignore();
-    access_flash_config_store();
-
-    TEST_ASSERT_EQUAL(NRF_ERROR_FORBIDDEN, access_model_subscription_list_dealloc(2));
-
-    m_flash_manager_config.write_complete_cb(mp_flash_manager, NULL, FM_RESULT_SUCCESS);
-    flash_manager_entry_count_get_IgnoreAndReturn(0);
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_subscription_list_dealloc(2));
-
-}
-

@@ -1,4 +1,4 @@
-# Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+# Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -79,7 +79,6 @@ PARAM_LENGTHS = {
     'nrf_mesh_dfu_type_t'   : 1,
     'nrf_mesh_dfu_state_t'  : 1,
     'nrf_mesh_dfu_packet_t' : 24,
-    'nrf_mesh_tx_token_t'   : 4,
     'access_model_id_t'     : 4,
     'dsm_handle_t'          : 2,
     'access_model_handle_t' : 2,
@@ -92,7 +91,7 @@ EXTERNAL_DEFINES = {
     'NRF_MESH_ECDH_PUBLIC_KEY_SIZE'     : 64,
     'NRF_MESH_ECDH_PRIVATE_KEY_SIZE'    : 32,
     'NRF_MESH_ECDH_SHARED_SECRET_SIZE'  : 32,
-    'NRF_MESH_SERIAL_PAYLOAD_MAXLEN'    : 254,
+    'NRF_MESH_SERIAL_PAYLOAD_MAXLEN'    : 97,
     'BLE_GAP_ADDR_LEN'                  : 6,
     'NRF_MESH_DFU_SIGNATURE_LEN'        : 64,
     'NRF_MESH_DFU_PUBLIC_KEY_LEN'       : 64,

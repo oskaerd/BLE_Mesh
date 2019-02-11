@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -42,12 +42,9 @@
 
 #include "prov_utils.h"
 
-#include "utils.h"
 #include "enc.h"
 #include "rand.h"
 #include "uECC.h"
-#include "mesh_config.h"
-#include "mesh_opt_prov.h"
 
 #define CONFIRMATION_KEY_INFO        (const uint8_t *) "prck"
 #define CONFIRMATION_KEY_INFO_LENGTH 4
@@ -62,16 +59,7 @@
 
 NRF_MESH_STATIC_ASSERT(NRF_MESH_PROV_OOB_SIZE_MAX == 8);
 
-MESH_CONFIG_ENTRY_IMPLEMENTATION(ecdh_offloading, MESH_OPT_PROV_ECDH_OFFLOADING_EID, 1, bool, true, true);
-
-/* Parameter digits is somewhere from 1 to @ref NRF_MESH_PROV_OOB_SIZE_MAX.
- * We're storing the largest number permitted for each value in a lookup
- * table:
- */
-static const uint32_t m_numeric_max[] =
-{
-    0, 10, 100, 1000, 10000, 100000, 1000000, 10000000, 100000000
-};
+static bool m_offload_ecdh = false;
 
 static void create_confirmation_salt(const nrf_mesh_prov_ctx_t * p_ctx, uint8_t * p_confirmation_salt)
 {
@@ -105,16 +93,25 @@ static void oob_gen_count(uint8_t * p_auth_value, uint8_t oob_size)
     rand_hw_rng_get(&count, 1);
     /* Mesh Profile Specification v1.0, section 5.4.2.2: random integer number between 1
      * and the [oob size] inclusive */
-    count = (count % oob_size) + 1;
+    count = (count % (oob_size + 1));
     p_auth_value[PROV_AUTH_LEN - 1] = count;
 }
 
 static void oob_gen_numeric(uint8_t * p_auth_value, uint8_t digits)
 {
+    /* Parameter digits is somewhere from 1 to @ref NRF_MESH_PROV_OOB_SIZE_MAX.
+     * We're storing the largest number permitted for each value in a lookup
+     * table:
+     */
+    static const uint32_t numeric_max[] =
+    {
+        0, 10, 100, 1000, 10000, 100000, 1000000, 10000000, 100000000
+    };
+
     uint32_t number;
     rand_hw_rng_get((uint8_t *) &number, sizeof(number));
     /* Big endian at end of auth value: */
-    number = LE2BE32((number % m_numeric_max[digits]));
+    number = LE2BE32((number % numeric_max[digits]));
     memcpy(&p_auth_value[PROV_AUTH_LEN - sizeof(number)], &number, sizeof(number));
 }
 
@@ -136,7 +133,16 @@ uint32_t prov_utils_opt_set(nrf_mesh_opt_id_t id, const nrf_mesh_opt_t * p_opt)
 {
     if (id == NRF_MESH_OPT_PROV_ECDH_OFFLOADING)
     {
-        return mesh_opt_prov_ecdh_offloading_set((bool) p_opt->opt.val);
+        if (p_opt->opt.val)
+        {
+            m_offload_ecdh = true;
+        }
+        else
+        {
+            m_offload_ecdh = false;
+        }
+
+        return NRF_SUCCESS;
     }
 
     return NRF_ERROR_INVALID_PARAM;
@@ -147,7 +153,8 @@ uint32_t prov_utils_opt_get(nrf_mesh_opt_id_t id, nrf_mesh_opt_t * p_opt)
     if (id == NRF_MESH_OPT_PROV_ECDH_OFFLOADING)
     {
         p_opt->len = 1;
-        return mesh_opt_prov_ecdh_offloading_get((bool *) &p_opt->opt.val);
+        p_opt->opt.val = m_offload_ecdh;
+        return NRF_SUCCESS;
     }
 
     return NRF_ERROR_INVALID_PARAM;
@@ -155,9 +162,7 @@ uint32_t prov_utils_opt_get(nrf_mesh_opt_id_t id, nrf_mesh_opt_t * p_opt)
 
 bool prov_utils_use_ecdh_offloading(void)
 {
-    bool retval;
-    NRF_MESH_ERROR_CHECK(mesh_opt_prov_ecdh_offloading_get(&retval));
-    return retval;
+    return m_offload_ecdh;
 }
 
 void prov_utils_authentication_values_derive(const nrf_mesh_prov_ctx_t * p_ctx,
@@ -334,35 +339,4 @@ bool prov_utils_confirmation_check(const nrf_mesh_prov_ctx_t * p_ctx)
                  confirmation);
 
     return memcmp(confirmation, p_ctx->peer_confirmation, sizeof(confirmation)) == 0;
-}
-
-bool prov_utils_auth_data_is_alphanumeric(const uint8_t * p_data, uint8_t size)
-{
-    for (uint8_t i = 0; i < size; ++i)
-    {
-        if (!(IS_IN_RANGE(p_data[i], (uint8_t) '0', (uint8_t) '9') ||
-              IS_IN_RANGE(p_data[i], (uint8_t) 'A', (uint8_t) 'Z')))
-        {
-            return false;
-        }
-    }
-    return true;
-}
-
-bool prov_utils_auth_data_is_valid_number(const uint8_t * p_data, uint8_t size)
-{
-    NRF_MESH_ASSERT_DEBUG(size <= NRF_MESH_PROV_OOB_SIZE_MAX);
-    uint32_t number;
-    memcpy(&number, p_data, sizeof(uint32_t));
-    return (number < m_numeric_max[size]);
-}
-
-uint32_t mesh_opt_prov_ecdh_offloading_set(bool enabled)
-{
-    return mesh_config_entry_set(MESH_OPT_PROV_ECDH_OFFLOADING_EID, &enabled);
-}
-
-uint32_t mesh_opt_prov_ecdh_offloading_get(bool * p_enabled)
-{
-    return mesh_config_entry_get(MESH_OPT_PROV_ECDH_OFFLOADING_EID, p_enabled);
 }

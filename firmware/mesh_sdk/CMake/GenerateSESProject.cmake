@@ -5,10 +5,10 @@ else ()
     option(GENERATE_SES_PROJECTS ON "Generate Segger Embedded Studio projects?")
 endif (NOT PYTHON_EXECUTABLE)
 
-set(nrf51422_xxAC_STARTUP_FILE "${SDK_ROOT}/modules/nrfx/mdk/ses_startup_nrf51.s")
-set(nrf52832_xxAA_STARTUP_FILE "${SDK_ROOT}/modules/nrfx/mdk/ses_startup_nrf52.s")
-set(nrf52840_xxAA_STARTUP_FILE "${SDK_ROOT}/modules/nrfx/mdk/ses_startup_nrf52840.s")
-set(SES_COMMON_STARTUP_FILE "${SDK_ROOT}/modules/nrfx/mdk/ses_startup_nrf_common.s")
+set(nrf51422_xxAC_VECTORS_FILE "${CMAKE_SOURCE_DIR}/external/nRF5_SDK_14.2.0_17b948a/components/toolchain/ses/ses_nrf51_Vectors.s")
+set(nrf52832_xxAA_VECTORS_FILE "${CMAKE_SOURCE_DIR}/external/nRF5_SDK_14.2.0_17b948a/components/toolchain/ses/ses_nrf52_Vectors.s")
+set(nrf52840_xxAA_VECTORS_FILE "${CMAKE_SOURCE_DIR}/external/nRF5_SDK_14.2.0_17b948a/components/toolchain/ses/ses_nrf52840_Vectors.s")
+set(nRF_STARTUP_FILE "${CMAKE_SOURCE_DIR}/external/nRF5_SDK_14.2.0_17b948a/components/toolchain/ses/ses_nRF_Startup.s")
 
 function (add_ses_project TARGET_NAME)
     if (GENERATE_SES_PROJECTS)
@@ -24,46 +24,29 @@ function (add_ses_project TARGET_NAME)
             set(target_include_dirs ${target_include_dirs} ${lib_include_dirs})
         endforeach ()
         # We'll remove the GCC one in python
-        set(target_sources ${target_sources} ${${PLATFORM}_STARTUP_FILE})
-        set(target_sources ${target_sources} ${SES_COMMON_STARTUP_FILE} "${CMAKE_CURRENT_SOURCE_DIR}/include/sdk_config.h")
+        set(target_sources ${target_sources} ${nRF_STARTUP_FILE})
+        set(target_sources ${target_sources} ${${PLATFORM}_VECTORS_FILE})
         set(target_defines NO_VTOR_CONFIG ${target_defines})
 
         list(REMOVE_DUPLICATES target_include_dirs)
-
-        file(RELATIVE_PATH default_sdk_path ${CMAKE_CURRENT_SOURCE_DIR} "${CMAKE_SOURCE_DIR}/../nRF5_SDK_15.2.0_9412b96")
-
-        set(target_sources_with_macro "")
-        foreach (target_source IN ITEMS ${target_sources})
-            string(REPLACE "${SDK_ROOT}" "$(SDK_ROOT:${default_sdk_path})" target_source_with_macro ${target_source})
-            set(target_sources_with_macro ${target_sources_with_macro} ${target_source_with_macro})
-        endforeach ()
-
-        list(REMOVE_DUPLICATES target_sources_with_macro)
-
-        set(target_include_dirs_with_macro "")
-        foreach (target_source IN ITEMS ${target_include_dirs})
-            string(REPLACE "${SDK_ROOT}" "$(SDK_ROOT:${default_sdk_path})" target_source_with_macro ${target_source})
-            set(target_include_dirs_with_macro ${target_include_dirs_with_macro} ${target_source_with_macro})
-        endforeach ()
-
-        string(REPLACE "${SDK_ROOT}" "$(SDK_ROOT:${default_sdk_path})" sd_hex ${${SOFTDEVICE}_HEX_FILE})
-
         file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/${TARGET_NAME}.json
-        "{
+            "{
     \"target\": {
         \"name\": \"${TARGET_NAME}\",
-        \"sources\": \"${target_sources_with_macro}\",
-        \"includes\": \"${target_include_dirs_with_macro}\",
+        \"sources\": \"${target_sources}\",
+        \"includes\": \"${target_include_dirs}\",
         \"defines\":\"${target_defines}\"
     },
     \"platform\": {
         \"name\": \"${PLATFORM}\",
-        \"definition_file\": \"${CMAKE_SOURCE_DIR}/tools/configuration/platforms.json\"
+        \"arch\": \"${${PLATFORM}_ARCH}\",
+        \"flash_size\": ${${PLATFORM}_FLASH_SIZE},
+        \"ram_size\": ${${PLATFORM}_RAM_SIZE}
     },
     \"softdevice\": {
-        \"name\": \"${SOFTDEVICE}\",
-        \"hex_file\": \"${sd_hex}\",
-        \"definition_file\": \"${CMAKE_SOURCE_DIR}/tools/configuration/softdevices.json\"
+        \"hex_file\": \"${${SOFTDEVICE}_HEX_FILE}\",
+        \"flash_size\": ${${SOFTDEVICE}_FLASH_SIZE},
+        \"ram_size\": ${${SOFTDEVICE}_RAM_SIZE}
     }
 }")
 

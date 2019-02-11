@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -40,7 +40,6 @@
 
 #include <stdint.h>
 #include "device_state_manager.h"
-#include "nrf_mesh.h"
 
 /**
  * @defgroup ACCESS Access layer API
@@ -53,8 +52,6 @@
  *
  * @{
  * @defgroup ACCESS_MSCS Access layer API MSCs
- * @brief Access layer sequence diagrams
- *
  * @{
  * @mscfile model.msc "Basic access layer usage"
  * @mscfile message_rx.msc "Receiving an access layer message"
@@ -101,7 +98,7 @@
  * @return Expands to an initializer for an @ref access_model_id_t struct.
  * @see access_model_id_t
  */
-#define ACCESS_MODEL_SIG(id)  {.company_id = ACCESS_COMPANY_ID_NONE, .model_id = (id)}
+#define ACCESS_MODEL_SIG(id)                  { (id), ACCESS_COMPANY_ID_NONE }
 
 /**
  * Macro used to define a vendor model ID.
@@ -110,7 +107,7 @@
  * @return Expands to an initializer for an @ref access_model_id_t struct.
  * @see access_model_id_t
  */
-#define ACCESS_MODEL_VENDOR(id, company) (access_model_id_t) {.company_id = (company), .model_id = (id)}
+#define ACCESS_MODEL_VENDOR(id, company)  { (id), (company) }
 
 /** Value used for TTL parameters in order to set the TTL to the default value. */
 #define ACCESS_TTL_USE_DEFAULT  (0xFF)
@@ -129,10 +126,6 @@
 #define ACCESS_PUBLISH_STEP_RES_BITS (2)
 /** Publish step number, number of bits. */
 #define ACCESS_PUBLISH_STEP_NUM_BITS (6)
-/** Publish Retransmit Count, number of bits. */
-#define ACCESS_PUBLISH_RETRANSMIT_COUNT_BITS (3)
-/** Publish Retransmit Interval Steps, number of bits. */
-#define ACCESS_PUBLISH_RETRANSMIT_INTERVAL_STEPS_BITS (5)
 
 /** Value used for access_publish_period_t structs when publishing is disabled. */
 #define ACCESS_PUBLISH_PERIOD_NONE   { ACCESS_PUBLISH_RESOLUTION_100MS, 0 }
@@ -150,10 +143,10 @@
 /** Access layer model ID. */
 typedef struct __attribute((packed))
 {
-    /** Company ID. Bluetooth SIG models shall set this to @ref ACCESS_COMPANY_ID_NONE. */
-    uint16_t company_id;
     /** Model ID. */
     uint16_t model_id;
+    /** Company ID. Bluetooth SIG models shall set this to @ref ACCESS_COMPANY_ID_NONE. */
+    uint16_t company_id;
 } access_model_id_t;
 
 /*lint -align_max(pop) */
@@ -175,12 +168,12 @@ typedef void (*access_publish_timeout_cb_t)(access_model_handle_t handle, void *
  * The format of the opcodes is given in the table below:
  * Table 3.43 in the Mesh Profile Specification (v1.0)
  *
- * | Byte 0     | Byte 1     | Byte 2     | Description                                                                                   |
- * | ---------- | ---------- | ---------- | --------------------------------------------------------------------------------------------- |
- * | `0xxxxxxx` |            |            | 1-octet Bluetooth SIG Opcodes (excluding 01111111)                                            |
- * | `01111111` |            |            | Reserved for Future Use                                                                       |
- * | `10xxxxxx` | `xxxxxxxx` |            | 2-octet Bluetooth SIG Opcodes                                                                 |
- * | `11xxxxxx` | `zzzzzzzz` | `zzzzzzzz` | 3-octet Vendor Specific Opcodes. `z` denotes company identifier packed in little-endian order |
+ * | Byte 0     | Byte 1     | Byte 2     | Description                                                     |
+ * | ---------- | ---------- | ---------- | --------------------------------------------------------------- |
+ * | `0xxxxxxx` |            |            | 1-octet Bluetooth SIG Opcodes (excluding 01111111)              |
+ * | `01111111` |            |            | Reserved for Future Use                                         |
+ * | `10xxxxxx` | `xxxxxxxx` |            | 2-octet Bluetooth SIG Opcodes                                   |
+ * | `11xxxxxx` | `zzzzzzzz` | `zzzzzzzz` | 3-octet Vendor Specific Opcodes. `z` denotes company identifier |
  *
  * To initialize an access_opcode_t, use the @ref ACCESS_OPCODE_SIG() or @ref ACCESS_OPCODE_VENDOR() macros.
  */
@@ -199,14 +192,14 @@ typedef struct
     nrf_mesh_address_t src;
     /** Destination address of the message. */
     nrf_mesh_address_t dst;
+    /** Timestamp of when the (last part of the) message was received in microseconds. */
+    uint32_t timestamp;
+    /** RSSI value for the received message */
+    int8_t rssi;
     /** TTL value for the received message. */
     uint8_t ttl;
     /** Application key handle that decrypted the message. */
     dsm_handle_t appkey_handle;
-    /** Core RX metadata attached to the packet */
-    const nrf_mesh_rx_metadata_t * p_core_metadata;
-    /** Network key handle that decrypted the message. */
-    dsm_handle_t subnet_handle;
 } access_message_rx_meta_t;
 
 /** Access layer RX event structure. */
@@ -231,11 +224,6 @@ typedef struct
     const uint8_t * p_buffer;
     /** Length of the data (excluding the opcode). */
     uint16_t length;
-    /** Forces the message to be sent out as a segmented message, if message is shorter than the size
-     * required for the unsegmented access message for a given MIC size */
-    bool force_segmented;
-    /** Select desired transport MIC size. See @ref nrf_mesh_transmic_size_t */
-    nrf_mesh_transmic_size_t transmic_size;
     /** Token that can be used as a reference in the TX complete callback. */
     nrf_mesh_tx_token_t access_token;
 } access_message_tx_t;
@@ -274,10 +262,7 @@ typedef struct
     access_model_id_t model_id;
     /** Element index to add the model to. */
     uint16_t element_index;
-    /**
-     * Pointer to list of opcode handler callbacks. This can be specified as NULL if
-     * @ref access_model_add_params_t::opcode_count is specified as zero.
-     */
+    /** Pointer to list of opcode handler callbacks. */
     const access_opcode_handler_t * p_opcode_handlers;
     /** Number of opcode handles. */
     uint32_t opcode_count;
@@ -303,17 +288,6 @@ typedef struct
     /** Number of steps. */
     uint8_t step_num : ACCESS_PUBLISH_STEP_NUM_BITS;
 } access_publish_period_t;
-
-/**
- * Model publish retransmit structure.
- */
-typedef struct
-{
-    /** Publish Retransmit Count. */
-    uint8_t count : ACCESS_PUBLISH_RETRANSMIT_COUNT_BITS;
-    /** Publish Retransmit Interval Steps. */
-    uint8_t interval_steps : ACCESS_PUBLISH_RETRANSMIT_INTERVAL_STEPS_BITS;
-} access_publish_retransmit_t;
 
 /**
  * Periodic publishing step resolution.
@@ -357,8 +331,7 @@ void access_clear(void);
  * @retval     NRF_ERROR_NULL            One or more of the function parameters was NULL.
  * @retval     NRF_ERROR_FORBIDDEN       Multiple model instances per element is not allowed.
  * @retval     NRF_ERROR_NOT_FOUND       Invalid access element index.
- * @retval     NRF_ERROR_INVALID_LENGTH  Number of opcodes was zero and pointer to the list of
- *                                       opcode handler callbacks is not NULL.
+ * @retval     NRF_ERROR_INVALID_LENGTH  Number of opcodes was zero.
  * @retval     NRF_ERROR_INVALID_PARAM   One or more of the opcodes had an invalid format.
  * @see        access_opcode_t for documentation of the valid format.
  */
@@ -367,16 +340,6 @@ uint32_t access_model_add(const access_model_add_params_t * p_model_params,
 
 /**
  * Publishes an access layer message to the publish address of the model.
- *
- * Once the message is published and the Public Retransmit Count
- * (see @ref config_publication_state_t.retransmit_count) for the model
- * is set to non-zero value, the message is queued for later re-transmissions.
- * If there is not enough memory to publish the message during the re-transmission
- * or if the previous transmission of the segmented message is still in progress,
- * the re-transmission attempt will be skipped. If the next message is published
- * before previous re-tranmissions are finished, the remaining re-transmissions
- * attempts of the previous message will be skipped. the re-transmission attempt
- * will be skipped.
  *
  * @param[in] handle    Access handle for the model that wants to send data.
  * @param[in] p_message Access layer TX message parameter structure.
@@ -390,10 +353,6 @@ uint32_t access_model_add(const access_model_add_params_t * p_model_params,
  * @retval NRF_ERROR_INVALID_PARAM  Model not bound to appkey, publish address not set or wrong
  *                                  opcode format.
  * @retval NRF_ERROR_INVALID_LENGTH Attempted to send message larger than @ref ACCESS_MESSAGE_LENGTH_MAX.
- * @retval NRF_ERROR_FORBIDDEN      Failed to allocate a sequence number from network.
- * @retval NRF_ERROR_INVALID_STATE  There's already a segmented packet to this destination in
- *                                  progress. Wait for it to finish before sending new segmented
- *                                  packets.
  */
 uint32_t access_model_publish(access_model_handle_t handle, const access_message_tx_t * p_message);
 
@@ -415,30 +374,10 @@ uint32_t access_model_publish(access_model_handle_t handle, const access_message
  * @retval NRF_ERROR_INVALID_PARAM  Model not bound to appkey, publish address not set or wrong
  *                                  opcode format.
  * @retval NRF_ERROR_INVALID_LENGTH Attempted to send message larger than @ref ACCESS_MESSAGE_LENGTH_MAX.
- * @retval NRF_ERROR_FORBIDDEN      Failed to allocate a sequence number from network.
- * @retval NRF_ERROR_INVALID_STATE  There's already a segmented packet to this destination in
- *                                  progress. Wait for it to finish before sending new segmented
- *                                  packets.
  */
 uint32_t access_model_reply(access_model_handle_t handle,
                             const access_message_rx_t * p_message,
                             const access_message_tx_t * p_reply);
-
-/**
- * Returns the element index for the model handle
- *
- * This function is indended to be used inside the state transaction callbacks triggered by the
- * model to quickly resolve the element index on which the message arrived.
- *
- * @param[in]  handle           Access handle for the model that wants to send data.
- * @param[out] p_element_index  Pointer to the hold retrieved element index for the model handle
- *
- * @retval NRF_SUCCESS          Model handle is valid and `element_index` pointer is updated.
- * @retval NRF_ERROR_NULL       NULL pointer supplied to function.
- * @retval NRF_ERROR_NOT_FOUND  Invalid model handle or model not bound to element.
- *
- */
-uint32_t access_model_element_index_get(access_model_handle_t handle, uint16_t * p_element_index);
 
 /** @} */
 #endif /* ACCESS_H__ */

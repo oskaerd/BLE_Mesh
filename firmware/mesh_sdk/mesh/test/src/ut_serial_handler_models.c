@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -51,7 +51,7 @@
                                                         CMD.length = (MIN)-1;   \
                                                         serial_cmd_rsp_send_Expect(CMD.opcode, SERIAL_STATUS_ERROR_INVALID_LENGTH, NULL, 0);   \
                                                         serial_handler_models_rx(&cmd); \
-                                                        CMD.length = MAX < NRF_MESH_SERIAL_PAYLOAD_MAXLEN ? (MAX)+1 : 0; \
+                                                        CMD.length = (MAX)+1;   \
                                                         serial_cmd_rsp_send_Expect(CMD.opcode, SERIAL_STATUS_ERROR_INVALID_LENGTH, NULL, 0);   \
                                                         serial_handler_models_rx(&cmd); \
                                                     } while (0)

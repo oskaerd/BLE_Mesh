@@ -6,10 +6,8 @@ option(BUILD_BOOTLOADER OFF "Build the Mesh Bootloader?")
 
 if (BUILD_BOOTLOADER)
     if (NOT CMAKE_BUILD_TYPE STREQUAL "MinSizeRel")
-        message(STATUS "Build type is \"${CMAKE_BUILD_TYPE}\". "
-            "The bootloader must be compiled with \"MinSizeRel\" in order to fit.")
-        set(CMAKE_BUILD_TYPE "MinSizeRel")
-        message(STATUS "Bootloader Build type is now \"${CMAKE_BUILD_TYPE}\". ")
+        message("WARNING: Build type is \"${CMAKE_BUILD_TYPE}\". "
+            "The bootloader might not fit with this configuration.")
     endif ()
 
     option(BOOTLOADER_DEBUG_ENABLE OFF
@@ -43,11 +41,12 @@ if (BUILD_BOOTLOADER)
 
     set(BOOTLOADER_INCLUDE_DIRS
         "${CMAKE_CURRENT_SOURCE_DIR}/include"
-        ${${nRF5_SDK_VERSION}_INCLUDE_DIRS}
-        "${SDK_ROOT}/components/libraries/sha256" CACHE INTERNAL "")
+        "${SDK_ROOT}/components/drivers_nrf/hal"
+        "${SDK_ROOT}/components/libraries/sha256"
+        "${SDK_ROOT}/components/libraries/util" CACHE INTERNAL "")
 
     set(BOOTLOADER_DEFINES
-        -DNORDIC_SDK_VERSION=15
+        -DNORDIC_SDK_VERSION=14
         -DBOOTLOADER
         -DRBC_MESH_PACKET_POOL_SIZE=32
         -DuECC_CURVE=uECC_secp256r1

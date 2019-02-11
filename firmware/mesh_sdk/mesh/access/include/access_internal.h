@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -42,8 +42,6 @@
 #include "bitfield.h"
 #include "device_state_manager.h"
 #include "access_publish.h"
-#include "utils.h"
-
 /**
  * @internal
  * @defgroup ACCESS_INTERNAL Access Layer internal definitions
@@ -70,7 +68,6 @@
 #define ACCESS_INTERNAL_STATE_OUTDATED  (1 << 1)
 #define ACCESS_INTERNAL_STATE_RESTORED  (1 << 2)
 #define ACCESS_INTERNAL_STATE_ALLOCATED_SET(INTERNAL_STATE) (INTERNAL_STATE |= ACCESS_INTERNAL_STATE_ALLOCATED)
-#define ACCESS_INTERNAL_STATE_ALLOCATED_CLR(INTERNAL_STATE) (INTERNAL_STATE &= ~ACCESS_INTERNAL_STATE_ALLOCATED)
 #define ACCESS_INTERNAL_STATE_OUTDATED_SET(INTERNAL_STATE)  (INTERNAL_STATE |= ACCESS_INTERNAL_STATE_OUTDATED)
 #define ACCESS_INTERNAL_STATE_OUTDATED_CLR(INTERNAL_STATE)  (INTERNAL_STATE &= ~ACCESS_INTERNAL_STATE_OUTDATED)
 #define ACCESS_INTERNAL_STATE_RESTORED_SET(INTERNAL_STATE)  (INTERNAL_STATE |= ACCESS_INTERNAL_STATE_RESTORED)
@@ -78,9 +75,9 @@
 #define ACCESS_INTERNAL_STATE_IS_OUTDATED(INTERNAL_STATE)   ((bool)((INTERNAL_STATE) & ACCESS_INTERNAL_STATE_OUTDATED))
 #define ACCESS_INTERNAL_STATE_IS_RESTORED(INTERNAL_STATE)   ((bool)((INTERNAL_STATE) & ACCESS_INTERNAL_STATE_RESTORED))
 
-#define ACCESS_MODEL_STATE_FLASH_SIZE (ALIGN_VAL((sizeof(fm_header_t) + sizeof(access_model_state_data_t)), WORD_SIZE) * ACCESS_MODEL_COUNT)
-#define ACCESS_SUBS_LIST_FLASH_SIZE   (ALIGN_VAL((sizeof(fm_header_t) + sizeof(access_flash_subscription_list_t)), WORD_SIZE) * ACCESS_SUBSCRIPTION_LIST_COUNT)
-#define ACCESS_ELEMENTS_FLASH_SIZE    (ALIGN_VAL((sizeof(fm_header_t) + sizeof(uint16_t)), WORD_SIZE) * ACCESS_ELEMENT_COUNT)
+#define ACCESS_MODEL_STATE_FLASH_SIZE ((sizeof(fm_header_t) + sizeof(access_model_state_data_t)) * ACCESS_MODEL_COUNT)
+#define ACCESS_SUBS_LIST_FLASH_SIZE   ((sizeof(fm_header_t) + sizeof(access_flash_subscription_list_t)) * ACCESS_SUBSCRIPTION_LIST_COUNT)
+#define ACCESS_ELEMENTS_FLASH_SIZE    ((sizeof(fm_header_t) + sizeof(uint16_t)) * ACCESS_ELEMENT_COUNT)
 #define ACCESS_FLASH_ENTRY_SIZE       (ACCESS_MODEL_STATE_FLASH_SIZE + ACCESS_SUBS_LIST_FLASH_SIZE + ACCESS_ELEMENTS_FLASH_SIZE)
 
 #define FLASH_HANDLE_TO_ACCESS_HANDLE_MASK (0x0FFF) /**< Mask to apply to convert a flash handle to a DSM handle. */
@@ -106,9 +103,9 @@ typedef struct
      * https://www.bluetooth.com/specifications/assigned-numbers/gatt-namespace-descriptors
      */
     uint16_t location;
-    /** Number of models defined by SIG. */
+    /** Number of SIG defined models. */
     uint8_t sig_model_count;
-    /** Number of vendor-specific models. */
+    /** Number of vendor specific models. */
     uint8_t vendor_model_count;
     /** Attention timer state. 0 is off, otherwise remaining time in seconds. */
     uint8_t attention_timer;
@@ -130,23 +127,18 @@ typedef struct
     uint16_t element_index;
     /** Subscription list for a model.*/
     uint16_t subscription_pool_index;
-    /** Friendship credentials flag. */
-    bool friendship_credential_flag;
-    /** This model's TTL value for each published packet. */
+    /** This model's TTL value for each published packet */
     uint8_t publish_ttl;
-    /** Number of steps and step resolution for the publication functionality. */
     access_publish_period_t publication_period;
-    /** The publish retransmit count and the interval of the retransmitting steps for the retransmitting functionality. */
-    access_publish_retransmit_t publication_retransmit;
-} access_model_state_data_t;
+}access_model_state_data_t;
 
 typedef struct
 {
-    /** Data pertaining to a specific model instance, which is crucial for maintaining the model's configuration in a network. */
+    /** Data pertaining to a specific model instance, which is crucial for maintaining its configuration in a network. */
     access_model_state_data_t model_info;
     /** Model publication state. */
     access_model_publication_state_t publication_state;
-    /** Pointer to the list of opcodes with the corresponding callback functions. */
+    /** Pointer to list of opcodes with corresponding callback functions. */
     const access_opcode_handler_t * p_opcode_handlers;
     /** Number of opcodes in list @ref p_opcode_handlers. */
     uint16_t opcode_count;
@@ -161,7 +153,7 @@ typedef struct
     uint16_t subscription_list_count;
     uint16_t element_count;
     uint16_t model_count;
-} access_flash_metadata_t;
+}access_flash_metadata_t;
 
 typedef struct
 {
@@ -169,36 +161,25 @@ typedef struct
 } access_flash_subscription_list_t;
 
 /**
- * Handles the received message and calls the acceptable model handler.
- *
- * @param[in]  p_message Pointer to the structure with information about
- *                       the received message (data, length, metadata).
+ * Initializes the access layer publication module.
  */
-void access_incoming_handle(const access_message_rx_t * p_message);
+void access_publish_init(void);
 
 /**
- * Internal function for publishing an access layer message.
- *
- * @param[in] handle             Access handle of the model that wants to send data.
- * @param[in] p_tx_message       Message to be published.
- * @param[in] p_access_payload   Access payload containing the access
- *                               message and the opcode.
- * @param[in] access_payload_len Access payload length.
- *
- * @retval NRF_SUCCESS              Successfully queued packet for transmission.
- * @retval NRF_ERROR_NO_MEM         Not enough memory available for message.
- * @retval NRF_ERROR_NOT_FOUND      Invalid model handle or model not bound to an element.
- * @retval NRF_ERROR_INVALID_PARAM  Model not bound to appkey, publish address not set or wrong
- *                                  opcode format.
- * @retval NRF_ERROR_INVALID_LENGTH Message that was about to be sent is larger than @ref ACCESS_MESSAGE_LENGTH_MAX.
- * @retval NRF_ERROR_INVALID_STATE  Segmented packets: There's already a segmented packet that is being sent to this destination.
-                                    Wait for this process to finish before sending new segmented packets.
- * @retval NRF_ERROR_FORBIDDEN      Unsegmented packets: Failed to allocate a sequence number from network.
+ * Sets the publishing period for a model.
+ * @param[in] p_pubstate  Model publication state.
+ * @param[in] resolution  Resolution of the publication timer.
+ * @param[in] step_number Number of steps at the specified resolution per publication event.
  */
-uint32_t access_packet_tx(access_model_handle_t handle,
-                          const access_message_tx_t * p_tx_message,
-                          const uint8_t *p_access_payload,
-                          uint16_t access_payload_len);
+void access_publish_period_set(access_model_publication_state_t * p_pubstate, access_publish_resolution_t resolution, uint8_t step_number);
+
+/**
+ * Retrieves the publishing period for a model.
+ * @param[in]  p_pubstate    Model publication state.
+ * @param[out] p_resolution  Pointer to a variable where the timer resolution is returned.
+ * @param[out] p_step_number Pointer to a variable where the number of steps per publication event is returned.
+ */
+void access_publish_period_get(const access_model_publication_state_t * p_pubstate, access_publish_resolution_t * p_resolution, uint8_t * p_step_number);
 
 /** @} */
 #endif /* ACCESS_INTERNAL_H__ */

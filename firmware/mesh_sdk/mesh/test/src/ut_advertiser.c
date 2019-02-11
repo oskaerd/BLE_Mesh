@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  * Redistribution and use in source and binary forms, with or without modification,
  * are permitted provided that the following conditions are met:
@@ -39,7 +39,7 @@
 #include "nrf.h"
 
 #include "advertiser.h"
-#include "utils.h"
+#include "nordic_common.h"
 #include "test_assert.h"
 
 #include "radio_config_mock.h"
@@ -104,7 +104,7 @@ void tearDown(void)
 }
 
 
-static void tx_complete_cb(advertiser_t * p_adv, nrf_mesh_tx_token_t token, timestamp_t timestamp)
+static void tx_complete_cb(advertiser_t * p_adv, nrf_mesh_tx_token_t token, uint32_t timestamp)
 {
     TEST_ASSERT_TRUE(m_expect_tx_cb > 0);
     m_expect_tx_cb--;
@@ -289,14 +289,14 @@ void test_config(void)
     memset(&m_adv.config, 0, sizeof(m_adv.config));
 
     /* interval config */
-    m_adv.timer.state = TIMER_EVENT_STATE_ADDED; /* Fake a scheduled timer to prevent reschedule */
+    m_adv.timer.state = TIMER_EVENT_STATE_QUEUED; /* Fake a scheduled timer to prevent reschedule */
     advertiser_interval_set(&m_adv, 100);
     TEST_ASSERT_EQUAL(100000, m_adv.config.advertisement_interval_us);
     /* corner cases, ensure no asserts: */
     advertiser_interval_set(&m_adv, BEARER_ADV_INT_MIN_MS);
     advertiser_interval_set(&m_adv, BEARER_ADV_INT_MAX_MS);
     /* schedule the timer: */
-    m_adv.timer.state = TIMER_EVENT_STATE_ADDED;
+    m_adv.timer.state = TIMER_EVENT_STATE_QUEUED;
     m_adv.enabled = true;
     timer_now_ExpectAndReturn(20000);
     rand_prng_get_ExpectAndReturn(NULL, 10);
@@ -339,11 +339,6 @@ void test_config(void)
     TEST_NRF_MESH_ASSERT_EXPECT(advertiser_address_set(&m_adv, NULL));
     TEST_NRF_MESH_ASSERT_EXPECT(advertiser_address_set(NULL, &config.adv_addr));
 
-    /* TX power */
-    advertiser_tx_power_set(&m_adv, RADIO_POWER_NRF_POS4DBM);
-    TEST_ASSERT_EQUAL(RADIO_POWER_NRF_POS4DBM, m_adv.broadcast.params.radio_config.tx_power);
-    /* invalid params: */
-    TEST_NRF_MESH_ASSERT_EXPECT(advertiser_tx_power_set(NULL, RADIO_POWER_NRF_0DBM));
 }
 
 void test_packet_alloc(void)
@@ -441,7 +436,7 @@ void test_packet_send(void)
     timer_sch_reschedule_Expect(&m_adv.timer, 2000);
 
     advertiser_packet_send(&m_adv, p_packet);
-    m_adv.timer.state = TIMER_EVENT_STATE_ADDED;
+    m_adv.timer.state = TIMER_EVENT_STATE_QUEUED;
 
     /* Commit packet again, should not reschedule the timer, as it's already scheduled. */
     packet_buffer_commit_Expect(&m_adv.buf,
@@ -573,6 +568,8 @@ void test_broadcast_callback(void)
     m_expect_tx_cb = 1;
     mp_expected_adv_packet = p_adv_packet;
     packet_buffer_free_Expect(&m_adv.buf, p_packet_buf);
+    packet_buffer_can_pop_ExpectAndReturn(&m_adv.buf, false);
+    timer_sch_abort_Expect(&m_adv.timer);
     m_bearer_event_sequential_post_callback_cnt = 0;
     bearer_event_sequential_post_StubWithCallback(bearer_event_sequential_post_callback);
     m_adv.broadcast.params.tx_complete_cb(&m_adv.broadcast.params, m_tx_timestamp_expected);

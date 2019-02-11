@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -36,7 +36,7 @@
  */
 
 #include "test_serial_bearer_common.h"
-#include <limits.h>
+
 
 /*********************************************************************
  * Tests                                                             *
@@ -50,7 +50,7 @@ void test_uart_tx(void)
 
     p_packet = (serial_packet_t*)test_data;
     /* serial packet must be allocated via serial_bearer not locally. */
-    p_packet->length = sizeof(test_data) - 1;
+    p_packet->length = sizeof(test_data);
     p_packet->opcode = SERIAL_OPCODE_EVT_DEVICE_ECHO_RSP;
     TEST_NRF_MESH_ASSERT_EXPECT(serial_bearer_tx(p_packet));
     /* If the requested length is too long, nothing will be reserved */
@@ -111,15 +111,8 @@ void test_uart_tx(void)
     /* Copy the contents of test_data */
     memcpy(&p_packet->opcode, test_data, p_packet->length);
     /* State IDLE so can start transmit */
-    /* First byte is END byte */
     transmit_bearer_event(p_buf_packet, true);
-    TEST_ASSERT_EQUAL(0xc0, NRF_UART0->TXD);
-
-    /* Second byte is size of packet */
-    m_tx_cb();
     TEST_ASSERT_EQUAL(sizeof(test_data)-1, NRF_UART0->TXD);
-    transmit_bearer_event(p_buf_packet, false);
-
     /* Second call to transmit produces nothing since we are already in TRANSMIT state*/
     transmit_bearer_event(p_buf_packet, false);
     for (uint32_t i = 0; i < sizeof(test_data)-1; ++i)
@@ -157,11 +150,6 @@ void test_uart_tx(void)
 
     /* Transmit the first buffer*/
     transmit_bearer_event(p_buf_packet, true);
-
-    TEST_ASSERT_EQUAL(0xc0, NRF_UART0->TXD); /* END byte */
-    m_tx_cb();
-
-    transmit_bearer_event(p_buf_packet, false);
     TEST_ASSERT_EQUAL(1, NRF_UART0->TXD); /* Length field of the first packet*/
     m_tx_cb();
     TEST_ASSERT_EQUAL(1, NRF_UART0->TXD); /* Opcode of the first packet */
@@ -178,9 +166,6 @@ void test_uart_tx(void)
 
     /* Transmit the second buffer */
     transmit_bearer_event(p_buf_packet2, true);
-    TEST_ASSERT_EQUAL(0xc0, NRF_UART0->TXD); /* END byte */
-    m_tx_cb();
-    transmit_bearer_event(p_buf_packet, false);
     TEST_ASSERT_EQUAL(2, NRF_UART0->TXD); /* Length field of the second packet*/
     /* SLIP_END (which is the opcode of this packet) will generate two bytes in being transmitted*/
     m_tx_cb();
@@ -294,7 +279,6 @@ void test_uart_rx(void)
 
 void test_too_long(void)
 {
-#if NRF_MESH_SERIAL_PAYLOAD_MAXLEN < (UINT8_MAX - 1)
     uint8_t packet_buffer[255] = { 0 };
     packet_buffer[254] = SLIP_END;
 
@@ -336,6 +320,5 @@ void test_too_long(void)
     packet_buffer_commit_IgnoreArg_p_buffer();
     serial_process_Expect();
     receive_char(NULL, SLIP_END, false, false);
-#endif  /* NRF_MESH_SERIAL_PAYLOAD_MAXLEN < (UINT8_MAX - 1) */
 }
 

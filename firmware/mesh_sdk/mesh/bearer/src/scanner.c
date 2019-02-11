@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -41,20 +41,9 @@
 #include "timeslot.h"
 #include "filter_engine.h"
 #include "debug_pins.h"
-#include "mesh_pa_lna_internal.h"
 #include "nrf_mesh_config_bearer.h"
-#include "bearer_handler.h"
 
-#ifdef NRF52_SERIES
-#define LNA_SETUP_OVERHEAD_US 1
-#elif defined(NRF51)
-#define LNA_SETUP_OVERHEAD_US 6
-#endif
-
-#define SCANNER_TIMER_INDEX_TIMESTAMP   (TS_TIMER_INDEX_RADIO)
-#define SCANNER_TIMER_INDEX_LNA_SETUP   (1)
-#define SCANNER_PPI_CH                  (TS_TIMER_PPI_CH_START + TS_TIMER_INDEX_RADIO)
-#define SCANNER_TIMER_LNA_INTERRUPT_Msk (1UL << (TIMER_INTENSET_COMPARE0_Pos + SCANNER_TIMER_INDEX_LNA_SETUP))
+#define SCANNER_TIMER_INDEX (TIMER_INDEX_RADIO)
 
 /** Scanner packet overhead (i.e. size of packet if length is 0). */
 #define SCANNER_PACKET_OVERHEAD (offsetof(scanner_packet_t, packet.addr))
@@ -143,10 +132,6 @@ static bool radio_set_packet(void)
         scanner_packet_t * p_packet = (scanner_packet_t *) m_scanner.p_buffer_packet->packet;
         NRF_RADIO->PACKETPTR = (uint32_t) &p_packet->packet;
     }
-    else
-    {
-        m_scanner.stats.out_of_memory++;
-    }
 
     m_scanner.waiting_for_memory = !got_packet;
     return got_packet;
@@ -172,9 +157,9 @@ static void radio_configure(void)
     NRF_RADIO->EVENTS_ADDRESS = 0;
 
     /* Set up timestamp capture */
-    NRF_PPI->CH[SCANNER_PPI_CH].EEP = (uint32_t) &NRF_RADIO->EVENTS_ADDRESS;
-    NRF_PPI->CH[SCANNER_PPI_CH].TEP = (uint32_t) &NRF_TIMER0->TASKS_CAPTURE[SCANNER_TIMER_INDEX_TIMESTAMP];
-    NRF_PPI->CHENSET = (1UL << SCANNER_PPI_CH);
+    NRF_PPI->CH[TIMER_PPI_CH_START + SCANNER_TIMER_INDEX].EEP = (uint32_t) &NRF_RADIO->EVENTS_ADDRESS;
+    NRF_PPI->CH[TIMER_PPI_CH_START + SCANNER_TIMER_INDEX].TEP = (uint32_t) &NRF_TIMER0->TASKS_CAPTURE[SCANNER_TIMER_INDEX];
+    NRF_PPI->CHENSET = (1UL << (TIMER_PPI_CH_START + SCANNER_TIMER_INDEX));
 }
 
 /**
@@ -205,7 +190,6 @@ static void radio_stop(void)
 #if !defined(HOST)
     while (NRF_RADIO->STATE != RADIO_STATE_STATE_Disabled);
 #endif
-    mesh_pa_lna_cleanup();
 }
 
 static void radio_start(void)
@@ -220,20 +204,9 @@ static void radio_start(void)
     }
     if (radio_set_packet())
     {
-        BEARER_ACTION_TIMER->TASKS_CAPTURE[SCANNER_TIMER_INDEX_LNA_SETUP] = 1;
         NRF_RADIO->TASKS_RXEN = 1;
-
-        mesh_lna_setup_start(BEARER_ACTION_TIMER->CC[SCANNER_TIMER_INDEX_LNA_SETUP] + LNA_SETUP_OVERHEAD_US,
-                             SCANNER_TIMER_INDEX_LNA_SETUP);
-        mesh_pa_lna_setup_stop();
-
-        BEARER_ACTION_TIMER->EVENTS_COMPARE[SCANNER_TIMER_INDEX_LNA_SETUP] = 0;
-        NVIC_ClearPendingIRQ(BEARER_ACTION_TIMER_IRQn);
-        BEARER_ACTION_TIMER->INTENSET = SCANNER_TIMER_LNA_INTERRUPT_Msk;
-
         DEBUG_PIN_SCANNER_ON(DEBUG_PIN_SCANNER_RADIO_IN_RX);
     }
-    m_scanner.window_state = SCAN_WINDOW_STATE_ON;
 }
 
 static void radio_handle_end_event(void)
@@ -262,8 +235,9 @@ static void radio_handle_end_event(void)
         p_packet->metadata.access_addr = m_scanner.config.access_addresses[NRF_RADIO->RXMATCH];
         /* The 6 lowest bit of the datawhite IV is the same as the channel number in BLE: */
         p_packet->metadata.channel = NRF_RADIO->DATAWHITEIV & 0x3F;
-        ts_timestamp_t rx_timestamp_ts = NRF_TIMER0->CC[SCANNER_TIMER_INDEX_TIMESTAMP];
-        p_packet->metadata.timestamp = ts_timer_to_device_time(rx_timestamp_ts);
+        /* Offset raw timer value by timeslot start time, to get device-timestamp: */
+        p_packet->metadata.timestamp =
+            timeslot_start_time_get() + NRF_TIMER0->CC[SCANNER_TIMER_INDEX];
 
         memcpy(p_packet->metadata.adv_addr.addr, p_packet->packet.addr, BLE_GAP_ADDR_LEN);
         p_packet->metadata.adv_addr.addr_type = p_packet->packet.header.addr_type;
@@ -273,7 +247,7 @@ static void radio_handle_end_event(void)
 
         if (m_scanner.rx_callback != NULL)
         {
-            m_scanner.rx_callback(p_packet, rx_timestamp_ts);
+            m_scanner.rx_callback(p_packet);
         }
 
         packet_buffer_commit(&m_scanner.packet_buffer,
@@ -292,22 +266,6 @@ static void radio_handle_end_event(void)
     DEBUG_PIN_SCANNER_OFF(DEBUG_PIN_SCANNER_END_EVENT);
 }
 
-static void radio_state_disabled_handle(void)
-{
-    switch (m_scanner.window_state)
-    {
-        case SCAN_WINDOW_STATE_NEXT_CHANNEL:
-        case SCAN_WINDOW_STATE_ON:
-            radio_start();
-            break;
-        case SCAN_WINDOW_STATE_OFF:
-            // Do nothing
-            break;
-        default:
-            NRF_MESH_ASSERT(false);
-    }
-}
-
 static void radio_state_rxidle_handle(void)
 {
     switch (m_scanner.window_state)
@@ -315,6 +273,8 @@ static void radio_state_rxidle_handle(void)
         case SCAN_WINDOW_STATE_NEXT_CHANNEL:
             /* Go to disabled state to change channels */
             radio_stop();
+
+            m_scanner.window_state = SCAN_WINDOW_STATE_ON;
             radio_start();
             break;
         case SCAN_WINDOW_STATE_ON:
@@ -339,6 +299,8 @@ static void radio_state_rx_handle(void)
         case SCAN_WINDOW_STATE_NEXT_CHANNEL:
             /* Go to disabled state to change channels */
             radio_stop();
+
+            m_scanner.window_state = SCAN_WINDOW_STATE_ON;
             radio_start();
             break;
         case SCAN_WINDOW_STATE_ON:
@@ -364,7 +326,7 @@ static void radio_setup_next_operation(void)
             switch (NRF_RADIO->STATE)
             {
                 case RADIO_STATE_STATE_Disabled:
-                    radio_state_disabled_handle();
+                    radio_start();
                     break;
                 case RADIO_STATE_STATE_RxIdle:
                     radio_state_rxidle_handle();
@@ -389,7 +351,7 @@ static void radio_setup_next_operation(void)
 * Bearer handler callback functions
 *****************************************************************************/
 
-void scanner_radio_start(ts_timestamp_t start_time)
+void scanner_radio_start(void)
 {
     DEBUG_PIN_SCANNER_ON(DEBUG_PIN_SCANNER_START);
     DEBUG_PIN_SCANNER_ON(DEBUG_PIN_SCANNER_IN_ACTION);
@@ -430,16 +392,6 @@ void scanner_radio_irq_handler(void)
     DEBUG_PIN_SCANNER_OFF(DEBUG_PIN_SCANNER_RADIO_IRQ);
 }
 
-void scanner_timer_irq_handler(void)
-{
-    /* As soon as the LNA timer fires, we prepare for the stop to avoid getting hit by rollover. */
-    NRF_MESH_ASSERT(BEARER_ACTION_TIMER->EVENTS_COMPARE[SCANNER_TIMER_INDEX_LNA_SETUP]);
-    BEARER_ACTION_TIMER->INTENCLR = SCANNER_TIMER_LNA_INTERRUPT_Msk;
-    BEARER_ACTION_TIMER->EVENTS_COMPARE[SCANNER_TIMER_INDEX_LNA_SETUP] = 0;
-    (void) BEARER_ACTION_TIMER->EVENTS_COMPARE[SCANNER_TIMER_INDEX_LNA_SETUP];
-
-    mesh_pa_lna_disable_start();
-}
 /*****************************************************************************
 * Timer handling
 *****************************************************************************/
@@ -509,7 +461,6 @@ void scanner_enable(void)
     {
         schedule_timers();
         m_scanner.state = SCANNER_STATE_RUNNING;
-        bearer_handler_wake_up();
     }
 }
 

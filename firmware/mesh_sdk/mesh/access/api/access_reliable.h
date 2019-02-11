@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -49,8 +49,6 @@
  * Reliable message sending for the access layer.
  * @{
  * @defgroup ACCESS_RELIABLE_MSCS Message sequence charts
- * @brief Reliable publishing sequence diagrams
- *
  * @{
  * @mscfile access_reliable_publish.msc "Reliable publish API usage"
  * @mscfile access_reliable_publish_fail.msc "Reliable publish API errors"
@@ -67,7 +65,7 @@
  * Minimum timeout for a reliable message in microseconds.
  * @note Mesh Profile Specification v1.0 recommends this to be minimum 60s.
  */
-#define ACCESS_RELIABLE_TIMEOUT_MIN  (SEC_TO_US(2))
+#define ACCESS_RELIABLE_TIMEOUT_MIN  (SEC_TO_US(30))
 
 /** Maximum timeout for a reliable message in microseconds. */
 #define ACCESS_RELIABLE_TIMEOUT_MAX  (SEC_TO_US(60))
@@ -110,9 +108,7 @@ typedef enum
      */
     ACCESS_RELIABLE_TRANSFER_SUCCESS,
     /** The reliable transfer reached its timeout. */
-    ACCESS_RELIABLE_TRANSFER_TIMEOUT,
-    /** The reliable transfer has been cancelled. */
-    ACCESS_RELIABLE_TRANSFER_CANCELLED
+    ACCESS_RELIABLE_TRANSFER_TIMEOUT
 } access_reliable_status_t;
 
 /**
@@ -202,16 +198,6 @@ uint32_t access_model_reliable_cancel(access_model_handle_t model_handle);
  * @param[in] p_args       Generic argument pointer for the model.
  */
 void access_reliable_message_rx_cb(access_model_handle_t model_handle, const access_message_rx_t * p_message, void * p_args);
-
-/**
- * Checks if the model context for the given model handle is free for acknowledged message publishing
- *
- * @param[in] model_handle Model handle of the model
- *
- * @retval True  If the model context is free for sending new acknowledged message.
- * @retval False If the model context is busy.
- */
-bool access_reliable_model_is_free(access_model_handle_t model_handle);
 
 /** @} */
 #endif /* ACCESS_RELIABLE_H__ */

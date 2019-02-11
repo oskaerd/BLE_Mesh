@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -54,7 +54,7 @@ void fen_filter_stop(filter_t * p_filter)
 {
     NRF_MESH_ASSERT(p_filter != NULL);
 
-    (void)list_remove(&m_filter_list_head, &p_filter->node);
+    list_remove(&m_filter_list_head, &p_filter->node);
 }
 
 bool fen_filters_apply(scanner_packet_t * p_packet)

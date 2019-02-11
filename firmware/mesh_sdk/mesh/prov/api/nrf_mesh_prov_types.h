@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -88,17 +88,12 @@
 /** Capabilities bit indicating that the FIPS P256EC algorithm is supported. */
 #define NRF_MESH_PROV_ALGORITHM_FIPS_P256EC          (1u << 0)
 
-/**
- * Capabilities bit indicating that the public key is available in-band.
- * If no public key type is set, this is the default
- */
-#define NRF_MESH_PROV_OOB_PUBKEY_TYPE_INBAND         (0)
 /** Capabilities bit indicating that the public key is available OOB. */
 #define NRF_MESH_PROV_OOB_PUBKEY_TYPE_OOB            (1u << 0)
-
-
 /** Capabilities bit indicating that static OOB authentication is supported. */
 #define NRF_MESH_PROV_OOB_STATIC_TYPE_SUPPORTED      (1u << 0)
+/** Capabilities bit indicating that the public key is available in-band. If no public key type is set, this is the default */
+#define NRF_MESH_PROV_OOB_PUBKEY_TYPE_INBAND         (0)
 
 /** Capabilities bit indicating that the device supports blinking as output OOB action. */
 #define NRF_MESH_PROV_OOB_OUTPUT_ACTION_BLINK        (1u << 0)
@@ -110,7 +105,6 @@
 #define NRF_MESH_PROV_OOB_OUTPUT_ACTION_NUMERIC      (1u << 3)
 /** Capabilities bit indicating that the device supports displaying alphanumeric data as output OOB action. */
 #define NRF_MESH_PROV_OOB_OUTPUT_ACTION_ALPHANUMERIC (1u << 4)
-
 /** Capabilities bit indicating that the device supports pushing something as input OOB action. */
 #define NRF_MESH_PROV_OOB_INPUT_ACTION_PUSH          (1u << 0)
 /** Capabilities bit indicating that the device supports twisting something as input OOB action. */
@@ -152,25 +146,6 @@
  */
 
 /**
- * The algorithm used for provisioning.
- */
-typedef enum
-{
-    NRF_MESH_PROV_ALGORITHM_FIPS_P256,   /**< FIPS P-256 Elliptic Curve. */
-    NRF_MESH_PROV_ALGORITHM_RFU          /**< Start value of reserved for the future range. */
-} nrf_mesh_prov_algorithm_t;
-
-/**
- * The Public Key kind of usage
- */
-typedef enum
-{
-    NRF_MESH_PROV_PUBLIC_KEY_NO_OOB = 0x00, /**< No OOB Public Key is used. */
-    NRF_MESH_PROV_PUBLIC_KEY_OOB    = 0x01, /**< OOB Public Key is used. */
-    NRF_MESH_PROV_PUBLIC_KEY_PROHIBITED     /**< Start value of prohibited range. */
-} nrf_mesh_prov_public_key_usage_t;
-
-/**
  * Out-of-band authentication methods for provisioning.
  */
  typedef enum
@@ -179,7 +154,6 @@ typedef enum
      NRF_MESH_PROV_OOB_METHOD_STATIC = 0x01, /**< Static OOB authentication method. */
      NRF_MESH_PROV_OOB_METHOD_OUTPUT = 0x02, /**< Output OOB authentication method. */
      NRF_MESH_PROV_OOB_METHOD_INPUT  = 0x03, /**< Input OOB authentication method. */
-     NRF_MESH_PROV_OOB_METHOD_PROHIBITED     /**< Start value of prohibited range. */
  } nrf_mesh_prov_oob_method_t;
 
  /**
@@ -191,7 +165,6 @@ typedef enum
      NRF_MESH_PROV_INPUT_ACTION_TWIST        = 0x01, /**< The user should do a twist action as input action. */
      NRF_MESH_PROV_INPUT_ACTION_ENTER_NUMBER = 0x02, /**< The user should enter a number into the device as input action. */
      NRF_MESH_PROV_INPUT_ACTION_ENTER_STRING = 0x03, /**< The user should enter a string into the device as input action. */
-     NRF_MESH_PROV_INPUT_ACTION_RFU                  /**< Start value of reserved for the future range. */
  } nrf_mesh_prov_input_action_t;
 
  /**
@@ -204,7 +177,6 @@ typedef enum
      NRF_MESH_PROV_OUTPUT_ACTION_VIBRATE         = 0x02, /**< The device should vibrate as output action. */
      NRF_MESH_PROV_OUTPUT_ACTION_DISPLAY_NUMERIC = 0x03, /**< The device should display a number as output action. */
      NRF_MESH_PROV_OUTPUT_ACTION_ALPHANUMERIC    = 0x04, /**< The device should display an alpha-numberic value as output action. */
-     NRF_MESH_PROV_OUTPUT_ACTION_RFU                     /**< Start value of reserved for the future range. */
  } nrf_mesh_prov_output_action_t;
 
  /**
@@ -274,24 +246,24 @@ typedef enum
 /**
  * Provisioning data to transmit to a device.
  */
-typedef struct __attribute((packed))
-{
-    /** Network key for the device. */
-    uint8_t  netkey[NRF_MESH_KEY_SIZE];
-    /** Network key index. */
-    uint16_t netkey_index;
-    /** IV_index value for the device, in little endian format. */
-    uint32_t iv_index;
-    /** Unicast address for the device. */
-    uint16_t address;
-    /** Flags. */
-    struct __attribute((packed)) {
-        /** IV update in progress flag. */
-        uint8_t iv_update   : 1;
-        /** Key refresh in progress flag. */
-        uint8_t key_refresh : 1;
-    } flags;
-} nrf_mesh_prov_provisioning_data_t;
+ typedef struct __attribute((packed))
+ {
+     /** Network key for the device. */
+     uint8_t  netkey[NRF_MESH_KEY_SIZE];
+     /** Network key index. */
+     uint16_t netkey_index;
+     /** IV_index value for the device, in little endian format. */
+     uint32_t iv_index;
+     /** Unicast address for the device. */
+     uint16_t address;
+     /** Flags. */
+     struct __attribute((packed)) {
+         /** IV update in progress flag. */
+         uint8_t iv_update   : 1;
+         /** Key refresh in progress flag. */
+         uint8_t key_refresh : 1;
+     } flags;
+ } nrf_mesh_prov_provisioning_data_t;
 
 /*lint -align_max(pop) */
 

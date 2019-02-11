@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -93,15 +93,15 @@ typedef enum
 /** Contents of the provisioning invite PDU. */
 typedef struct __attribute((packed))
 {
-    uint8_t pdu_type;               /**< Packet PDU type can be one of type @ref prov_pdu_type_t. */
-    uint8_t attention_duration_s;   /**< Attention timer value in seconds. */
+    uint8_t pdu_type;           /**< Packet PDU type can be one of type @ref prov_pdu_type_t. */
+    uint8_t attention_duration; /**< Attention timer value in seconds. */
 } prov_pdu_invite_t;
 
 /** Contents of the provisioning capabilities PDU. */
 typedef struct __attribute((packed))
 {
     uint8_t  pdu_type;           /**< Packet PDU type can be one of type @ref prov_pdu_type_t. */
-    uint8_t  num_elements;       /**< Number of elements */
+    uint8_t  num_components;     /**< Number of components */
     uint16_t algorithms;         /**< Supported authentication algorithms. */
     uint8_t  pubkey_type;        /**< Supported public key types. */
     uint8_t  oob_static_types;   /**< Supported static OOB types. */

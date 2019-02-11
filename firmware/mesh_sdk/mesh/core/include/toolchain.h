@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -44,36 +44,26 @@ void toolchain_init_irqs(void);
 #if defined(_lint)
     #define _DISABLE_IRQS(_was_masked) _was_masked = 0; __disable_irq()
     #define _ENABLE_IRQS(_was_masked) (void) _was_masked; __enable_irq()
-    #define _DEPRECATED
-    #define _UNUSED
 #elif defined(UNIT_TEST)
     #define _DISABLE_IRQS(_was_masked) (void)_was_masked /* avoid "not used" warning */
     #define _ENABLE_IRQS(_was_masked)
     #define _GET_LR(lr) lr = (uint32_t) __builtin_return_address(0);
-    #define _DEPRECATED
-    #define _UNUSED __attribute__((unused))
 #elif defined(MTT_TEST)
     #include <pthread.h>
     extern pthread_mutex_t irq_mutex;
     #define _GET_LR(lr) lr = (uint32_t) __builtin_return_address(0);
     #define _DISABLE_IRQS(_was_masked) pthread_mutex_lock(&irq_mutex); (void) _was_masked;
     #define _ENABLE_IRQS(_was_masked) pthread_mutex_unlock(&irq_mutex);
-    /** Mark a function, variable or type as deprecated. */
-    #define _DEPRECATED
 #elif defined(__CC_ARM)
-    /** Disable all interrupts and get whether it was masked. */
+/** Disable all interrupts and get whether it was masked. */
     #define _DISABLE_IRQS(_was_masked) _was_masked = __disable_irq()
 
-    /** Enable all interrupts if they weren't masked. */
+/** Enable all interrupts if they weren't masked. */
     #define _ENABLE_IRQS(_was_masked) do{ if (!(_was_masked)) { __enable_irq(); } } while(0)
 
-    /** Get the value of the link register. */
+/** Get the value of the link register. */
     #define _GET_LR(lr) do { lr = __return_address(); } while (0)
 
-    /** Mark a function, variable or type as deprecated. */
-    #define _DEPRECATED __attribute__((deprecated))
-    /** Mark a function, variable, or type as potentially unused. */
-    #define _UNUSED __attribute__((unused))
 #elif defined(__GNUC__)
 /** Disable all interrupts and get whether it was masked. */
     #define _DISABLE_IRQS(_was_masked) do{ \
@@ -81,23 +71,13 @@ void toolchain_init_irqs(void);
             __ASM volatile ("cpsid i" : : : "memory");\
         } while(0)
 
-    /** Enable all interrupts if they weren't masked. */
+/** Enable all interrupts if they weren't masked. */
     #define _ENABLE_IRQS(_was_masked) do{ if (!(_was_masked)) { __enable_irq(); } } while(0)
 
-    /** Get the value of the link register. */
+/** Get the value of the link register. */
     #define _GET_LR(lr) do { lr = (uint32_t) __builtin_return_address(0); } while (0)
 
-    /** Mark a function, variable or type as deprecated. */
-    #define _DEPRECATED __attribute__((deprecated))
-    /** Mark a function, variable, or type as potentially unused. */
-    #define _UNUSED __attribute__((unused))
 #endif
 
-/*Segger embedded studio originally has offsetof macro which cannot be used in macros (like STATIC_ASSERT).
-  This redefinition is to allow using that. */
-#if defined(__SES_ARM) && defined(__GNUC__)
-#undef offsetof
-#define offsetof(TYPE, MEMBER) __builtin_offsetof (TYPE, MEMBER)
-#endif
 
 #endif /* TOOLCHAIN_H__ */

@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -40,7 +40,28 @@
 #include "nrf_mesh.h"
 #include "nrf_mesh_opt.h"
 #include "core_tx.h"
-#include "net_packet.h"
+
+typedef struct
+{
+    /** Packet destination address. */
+    nrf_mesh_address_t dst;
+    /** Address of the element the packet originates from (must be a unicast address). */
+    uint16_t src;
+    /** Time to live value for the packet, this is a 7 bit value. */
+    uint8_t ttl;
+    /** Flag indicating whether the packet is a control packet. */
+    bool control_packet;
+    /** Parameters generated internally. */
+    struct
+    {
+        /** Sequence number of the message. */
+        uint32_t sequence_number;
+        /** IV index of the message. */
+        uint32_t iv_index;
+    } internal;
+    /** Network security material. */
+    const nrf_mesh_network_secmat_t * p_security_material;
+} network_packet_metadata_t;
 
 typedef struct
 {
@@ -53,13 +74,9 @@ typedef struct
         nrf_mesh_tx_token_t token;
         /** Length of the payload. */
         uint32_t payload_len;
-        /** The bearer on which the outgoing packets are to be sent on. Alternatively, use CORE_TX_BEARER_TYPE_ALLOW_ALL to allow allocation to all bearers. */
-        core_tx_bearer_type_t bearer_selector;
-        /** Role this device has for the packet. */
-        core_tx_role_t role;
     } user_data;
-
-
+    /** Core TX metadata, set in the allocation. */
+    core_tx_metadata_t core_tx;
     /** Pointer to the network data, set in the allocation. */
     uint8_t * p_payload;
 } network_tx_packet_buffer_t;
@@ -76,11 +93,6 @@ typedef struct
  * @param[in] p_init_params Pointer to the initialization parameters structure.
  */
 void network_init(const nrf_mesh_init_params_t * p_init_params);
-
-/**
- * Enables the network module.
- */
-void network_enable(void);
 
 /**
  * Sets a network layer option.
@@ -144,7 +156,7 @@ void network_packet_discard(const network_tx_packet_buffer_t * p_buffer);
  *
  * @retval NRF_SUCCESS The packet was successfully processed.
  * @retval NRF_ERROR_INVALID_ADDR The destination address is not valid.
- * @retval NRF_ERROR_NOT_FOUND    The packet could not be decrypted.
+ * @retval NRF_ERROR_NOT_FOUND    The packet could not be decrypted by the transport layer.
  */
 uint32_t network_packet_in(const uint8_t * p_packet, uint32_t net_packet_len, const nrf_mesh_rx_metadata_t * p_rx_metadata);
 

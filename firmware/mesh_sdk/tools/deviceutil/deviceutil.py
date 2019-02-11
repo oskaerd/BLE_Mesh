@@ -1,4 +1,4 @@
-# Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+# Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -58,11 +58,9 @@ def make_bootloader_for_platforms(platforms):
 
 
 def get_application_limits(platform, softdevice):
-    mbr_scratch_area = 4*KB if platform["name"].startswith("nrf52") else 0
     return {"flash_start": softdevice["flash_size"],
             "flash_size": (platform["bootloader"]["flash_start"]
-                           - softdevice["flash_size"]
-                           - mbr_scratch_area),
+                           - softdevice["flash_size"]),
             "ram_start": platform["ram_start"] + softdevice["ram_size"],
             "ram_size": ((platform["bootloader"]["ram_start"]
                           - softdevice["ram_size"])
@@ -85,6 +83,6 @@ def load_platforms(filename):
     with open(filename, "r") as f:
         d = json.load(f)["platforms"]
 
-    # No support for nrf51422_xxAB yet.
+    # No support for nrf52810 and nrf51422_xxAB yet.
     return [p for p in d
-            if "nrf51422_xxAB" not in p["name"]]
+            if "nrf52810" not in p["name"] and "nrf51422_xxAB" not in p["name"]]

@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -46,7 +46,7 @@
  */
 
 /** Spec-defined access address for non-connected state */
-#define BEARER_ACCESS_ADDR_NONCONN 0x8E89BED6U
+#define BEARER_ACCESS_ADDR_NONCONN 0x8E89BED6
 
 /** Lower boundary on advertisement interval. */
 #define BEARER_ADV_INT_MIN_MS (20)

@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -40,7 +40,7 @@
 #include <unity.h>
 #include <cmock.h>
 
-#include "utils.h"
+#include "nordic_common.h"
 #include "test_assert.h"
 
 #include "bearer_event_mock.h"
@@ -48,12 +48,9 @@
 #include "nrf_mesh_cmsis_mock_mock.h"
 #include "packet_buffer_mock.h"
 #include "radio_config_mock.h"
-#include "timeslot_timer_mock.h"
 #include "timer_mock.h"
 #include "timer_scheduler_mock.h"
 #include "timeslot_mock.h"
-#include "mesh_pa_lna_internal_mock.h"
-#include "bearer_handler_mock.h"
 
 /* Include module to be tested (to get access to internal state) */
 #include "../../bearer/src/scanner.c"
@@ -65,8 +62,6 @@ NRF_PPI_Type * NRF_PPI;
 static NRF_PPI_Type m_ppi;
 NRF_TIMER_Type * NRF_TIMER0;
 static NRF_TIMER_Type m_timer0;
-NRF_TIMER_Type * NRF_TIMER2;
-static NRF_TIMER_Type m_timer2;
 
 #define TIME_NOW                (123)
 #define RSSISAMPLE_VALUE        (50)
@@ -74,7 +69,6 @@ static NRF_TIMER_Type m_timer2;
 #define DATAWHITEIV_VALUE       (37)
 #define TIME_UNTIL_END_EVENT    (100)
 #define BEARER_EVENT_FLAG       (7)
-#define LNA_TIMER_INDEX         (1)
 
 static int packet_buffer_free_callback_cnt = 0;
 
@@ -140,36 +134,24 @@ static bool scanner_packet_process_callback(void)
     return true;
 }
 
-static void expect_lna_setup(void)
-{
-    /* Setup LNA with IRQ to turn it off */
-    NRF_TIMER2->CC[SCANNER_TIMER_INDEX_LNA_SETUP] = 10;
-    mesh_lna_setup_start_Expect(NRF_TIMER2->CC[SCANNER_TIMER_INDEX_LNA_SETUP] + LNA_SETUP_OVERHEAD_US, SCANNER_TIMER_INDEX_LNA_SETUP);
-    mesh_pa_lna_setup_stop_Expect();
-    NVIC_ClearPendingIRQ_Expect(BEARER_ACTION_TIMER_IRQn);
-}
 /******** CUnit callbacks ********/
 void setUp(void)
 {
     packet_buffer_mock_Init();
-    timeslot_timer_mock_Init();
     timer_mock_Init();
     timer_scheduler_mock_Init();
     radio_config_mock_Init();
     timeslot_mock_Init();
     nrf_mesh_cmsis_mock_mock_Init();
     filter_engine_mock_Init();
-    mesh_pa_lna_internal_mock_Init();
-    bearer_handler_mock_Init();
 
     memset(&m_radio,  0, sizeof(NRF_RADIO_Type));
     memset(&m_ppi,    0, sizeof(NRF_PPI_Type));
-    memset(&m_timer2, 0, sizeof(NRF_TIMER_Type));
+    memset(&m_timer0, 0, sizeof(NRF_TIMER_Type));
 
     NRF_RADIO           = (NRF_RADIO_Type*) &m_radio;
     NRF_PPI             = (NRF_PPI_Type*) &m_ppi;
     NRF_TIMER0          = (NRF_TIMER_Type*) &m_timer0;
-    NRF_TIMER2          = (NRF_TIMER_Type*) &m_timer2;
 
     packet_buffer_free_callback_cnt = 0;
 }
@@ -178,8 +160,6 @@ void tearDown(void)
 {
     packet_buffer_mock_Verify();
     packet_buffer_mock_Destroy();
-    timeslot_timer_mock_Verify();
-    timeslot_timer_mock_Destroy();
     timer_mock_Verify();
     timer_mock_Destroy();
     timer_scheduler_mock_Verify();
@@ -192,10 +172,6 @@ void tearDown(void)
     nrf_mesh_cmsis_mock_mock_Destroy();
     filter_engine_mock_Verify();
     filter_engine_mock_Destroy();
-    mesh_pa_lna_internal_mock_Verify();
-    mesh_pa_lna_internal_mock_Destroy();
-    bearer_handler_mock_Verify();
-    bearer_handler_mock_Destroy();
     scanner_reset();
 }
 
@@ -218,7 +194,6 @@ void test_enable_CONTINUOUS(void)
     timer_now_ExpectAndReturn(TIME_NOW);
     timer_sch_abort_Expect(&m_scanner.timer_window_end);
     timer_sch_reschedule_Expect(&m_scanner.timer_window_start, TIME_NOW);
-    bearer_handler_wake_up_Expect();
     scanner_enable();
     TEST_ASSERT_EQUAL(SCANNER_STATE_RUNNING, m_scanner.state);
 }
@@ -233,7 +208,6 @@ void test_enable_NOT_CONTINUOUS(void)
     timer_sch_reschedule_Expect(&m_scanner.timer_window_start, TIME_NOW);
     scanner_config_scan_time_set(MS_TO_US(BEARER_SCAN_INT_DEFAULT_MS) * 2,
                                  MS_TO_US(BEARER_SCAN_WINDOW_DEFAULT_MS));
-    bearer_handler_wake_up_Expect();
     scanner_enable();
     TEST_ASSERT_EQUAL(SCANNER_STATE_RUNNING, m_scanner.state);
 
@@ -461,7 +435,7 @@ void test_radio_start_NOT_IN_WINDOW(void)
     radio_config_config_Expect(&m_scanner.config.radio_config);
     radio_config_access_addr_set_Expect(BEARER_ACCESS_ADDR_DEFAULT, 0);
 
-    scanner_radio_start(TIME_NOW);
+    scanner_radio_start();
 
     /* Verify resulting state */
     TEST_ASSERT_NOT_EQUAL(0, m_radio.RXADDRESSES);
@@ -470,10 +444,10 @@ void test_radio_start_NOT_IN_WINDOW(void)
                       m_radio.SHORTS);
     TEST_ASSERT_EQUAL(0, m_radio.EVENTS_ADDRESS);
     TEST_ASSERT_EQUAL((uint32_t) &NRF_RADIO->EVENTS_ADDRESS,
-                      m_ppi.CH[TS_TIMER_PPI_CH_START + TS_TIMER_INDEX_RADIO].EEP);
-    TEST_ASSERT_EQUAL((uint32_t) &NRF_TIMER0->TASKS_CAPTURE[SCANNER_TIMER_INDEX_TIMESTAMP],
-                      m_ppi.CH[TS_TIMER_PPI_CH_START + TS_TIMER_INDEX_RADIO].TEP);
-    TEST_ASSERT_EQUAL(1 << (TS_TIMER_PPI_CH_START + TS_TIMER_INDEX_RADIO), m_ppi.CHENSET);
+                      m_ppi.CH[TIMER_PPI_CH_START + TIMER_INDEX_RADIO].EEP);
+    TEST_ASSERT_EQUAL((uint32_t) &NRF_TIMER0->TASKS_CAPTURE[TIMER_INDEX_RADIO],
+                      m_ppi.CH[TIMER_PPI_CH_START + TIMER_INDEX_RADIO].TEP);
+    TEST_ASSERT_EQUAL(1 << (TIMER_PPI_CH_START + TIMER_INDEX_RADIO), m_ppi.CHENSET);
     TEST_ASSERT_EQUAL(0, m_radio.TASKS_RXEN);
     TEST_ASSERT_EQUAL(0, m_radio.PACKETPTR);
     TEST_ASSERT_EQUAL(false, m_scanner.waiting_for_memory);
@@ -496,9 +470,7 @@ void test_radio_start_IN_WINDOW(void)
                                           sizeof(scanner_packet_t), NRF_SUCCESS);
     packet_buffer_reserve_ReturnThruPtr_pp_packet(&p_packet_buffer_packet);
 
-    expect_lna_setup();
-
-    scanner_radio_start(TIME_NOW);
+    scanner_radio_start();
 
     /* Verify resulting state */
     TEST_ASSERT_EQUAL(true, m_scanner.has_radio_context);
@@ -508,15 +480,14 @@ void test_radio_start_IN_WINDOW(void)
                       m_radio.SHORTS);
     TEST_ASSERT_EQUAL(0, m_radio.EVENTS_ADDRESS);
     TEST_ASSERT_EQUAL((uint32_t) &NRF_RADIO->EVENTS_ADDRESS,
-                      m_ppi.CH[TS_TIMER_PPI_CH_START + TS_TIMER_INDEX_RADIO].EEP);
-    TEST_ASSERT_EQUAL((uint32_t) &NRF_TIMER0->TASKS_CAPTURE[SCANNER_TIMER_INDEX_TIMESTAMP],
-                      m_ppi.CH[TS_TIMER_PPI_CH_START + TS_TIMER_INDEX_RADIO].TEP);
-    TEST_ASSERT_EQUAL(1 << (TS_TIMER_PPI_CH_START + TS_TIMER_INDEX_RADIO), m_ppi.CHENSET);
+                      m_ppi.CH[TIMER_PPI_CH_START + TIMER_INDEX_RADIO].EEP);
+    TEST_ASSERT_EQUAL((uint32_t) &NRF_TIMER0->TASKS_CAPTURE[TIMER_INDEX_RADIO],
+                      m_ppi.CH[TIMER_PPI_CH_START + TIMER_INDEX_RADIO].TEP);
+    TEST_ASSERT_EQUAL(1 << (TIMER_PPI_CH_START + TIMER_INDEX_RADIO), m_ppi.CHENSET);
     TEST_ASSERT_EQUAL(1, m_radio.TASKS_RXEN);
     TEST_ASSERT_NOT_EQUAL(0, m_radio.PACKETPTR);
     TEST_ASSERT_EQUAL(false, m_scanner.waiting_for_memory);
     TEST_ASSERT_NOT_NULL(m_scanner.p_buffer_packet);
-    TEST_ASSERT_EQUAL_HEX32((1 << (TIMER_INTENSET_COMPARE0_Pos + LNA_TIMER_INDEX)), NRF_TIMER2->INTENSET);
 }
 
 void test_radio_start_IN_WINDOW_BUFFER_RESERVE_FAILED(void)
@@ -531,7 +502,7 @@ void test_radio_start_IN_WINDOW_BUFFER_RESERVE_FAILED(void)
                                           &m_scanner.p_buffer_packet,
                                           sizeof(scanner_packet_t), NRF_ERROR_NO_MEM);
 
-    scanner_radio_start(TIME_NOW);
+    scanner_radio_start();
 
     /* Verify resulting state */
     TEST_ASSERT_EQUAL(true, m_scanner.has_radio_context);
@@ -541,10 +512,10 @@ void test_radio_start_IN_WINDOW_BUFFER_RESERVE_FAILED(void)
                       m_radio.SHORTS);
     TEST_ASSERT_EQUAL(0, m_radio.EVENTS_ADDRESS);
     TEST_ASSERT_EQUAL((uint32_t) &NRF_RADIO->EVENTS_ADDRESS,
-                      m_ppi.CH[TS_TIMER_PPI_CH_START + TS_TIMER_INDEX_RADIO].EEP);
-    TEST_ASSERT_EQUAL((uint32_t) &NRF_TIMER0->TASKS_CAPTURE[SCANNER_TIMER_INDEX_TIMESTAMP],
-                      m_ppi.CH[TS_TIMER_PPI_CH_START + TS_TIMER_INDEX_RADIO].TEP);
-    TEST_ASSERT_EQUAL(1 << (TS_TIMER_PPI_CH_START + TS_TIMER_INDEX_RADIO), m_ppi.CHENSET);
+                      m_ppi.CH[TIMER_PPI_CH_START + TIMER_INDEX_RADIO].EEP);
+    TEST_ASSERT_EQUAL((uint32_t) &NRF_TIMER0->TASKS_CAPTURE[TIMER_INDEX_RADIO],
+                      m_ppi.CH[TIMER_PPI_CH_START + TIMER_INDEX_RADIO].TEP);
+    TEST_ASSERT_EQUAL(1 << (TIMER_PPI_CH_START + TIMER_INDEX_RADIO), m_ppi.CHENSET);
     TEST_ASSERT_EQUAL(0, m_radio.TASKS_RXEN);
     TEST_ASSERT_EQUAL(0, m_radio.PACKETPTR);
     TEST_ASSERT_EQUAL(true, m_scanner.waiting_for_memory);
@@ -556,8 +527,6 @@ void test_radio_stop(void)
 
     NRF_RADIO->EVENTS_END = 1;      /* Set END event flag to test that it is cleared */
     packet_buffer_free_Expect(&m_scanner.packet_buffer, m_scanner.p_buffer_packet);
-
-    mesh_pa_lna_cleanup_Expect();
 
     scanner_radio_stop();
 
@@ -651,12 +620,13 @@ void test_radio_irq_handler_END_EVENT_SUCCESSFUL(void)
     m_radio.RXMATCH     = RXMATCH_VALUE;
     m_radio.DATAWHITEIV = DATAWHITEIV_VALUE;
     m_radio.STATE       = RADIO_STATE_STATE_RxIdle;
-    m_timer0.CC[TS_TIMER_INDEX_RADIO] = TIME_NOW;
 
     p_scanner_packet->packet.header.length = 2;
 
+    m_timer0.CC[SCANNER_TIMER_INDEX] = TIME_UNTIL_END_EVENT;
+
     /* Set up radio_handle_end_event() */
-    ts_timer_to_device_time_ExpectAndReturn(TIME_NOW, TIME_NOW + 100);
+    timeslot_start_time_get_ExpectAndReturn(TIME_NOW);
     packet_buffer_commit_Expect(&m_scanner.packet_buffer,
                                 m_scanner.p_buffer_packet,
                                 SCANNER_PACKET_OVERHEAD +
@@ -675,7 +645,7 @@ void test_radio_irq_handler_END_EVENT_SUCCESSFUL(void)
 
     /* Verify resulting state */
     TEST_ASSERT_EQUAL(0, m_radio.EVENTS_END);
-    TEST_ASSERT_EQUAL_UINT32(TIME_NOW+100, p_scanner_packet->metadata.timestamp);
+    TEST_ASSERT_EQUAL_UINT32(TIME_NOW + TIME_UNTIL_END_EVENT, p_scanner_packet->metadata.timestamp);
     TEST_ASSERT_EQUAL_UINT32(m_scanner.config.access_addresses[NRF_RADIO->RXMATCH], p_scanner_packet->metadata.access_addr);
     TEST_ASSERT_EQUAL_UINT8(DATAWHITEIV_VALUE & 0x3F, p_scanner_packet->metadata.channel);
     TEST_ASSERT_EQUAL_INT8(-RSSISAMPLE_VALUE, p_scanner_packet->metadata.rssi);
@@ -714,9 +684,6 @@ void test_radio_irq_handler_AFTER_WINDOW_START(void)
     packet_buffer_reserve_ReturnThruPtr_pp_packet(&p_packet_buffer_packet);
     m_radio.TASKS_RXEN = 0;
 
-    mesh_pa_lna_cleanup_Expect();
-    expect_lna_setup();
-
     scanner_radio_irq_handler();
 
     packet_buffer_free_StubWithCallback(NULL);
@@ -739,8 +706,6 @@ void test_radio_irq_handler_AFTER_WINDOW_END(void)
     packet_buffer_free_Expect(&m_scanner.packet_buffer, m_scanner.p_buffer_packet);
     m_radio.TASKS_RXEN = 0;
 
-    mesh_pa_lna_cleanup_Expect();
-
     scanner_radio_irq_handler();
 
     /* Verify resulting state */
@@ -756,8 +721,6 @@ void test_radio_irq_handler_AFTER_WINDOW_END(void)
 void test_radio_irq_handler_SCANNER_DISABLE(void)
 {
     scanner_disable_helper();
-
-    mesh_pa_lna_cleanup_Expect();
 
     scanner_radio_irq_handler();
 
@@ -796,12 +759,13 @@ void test_radio_irq_handler_WINDOW_END_AFTER_RX(void)
     m_radio.RXMATCH     = RXMATCH_VALUE;
     m_radio.DATAWHITEIV = DATAWHITEIV_VALUE;
     m_radio.STATE       = RADIO_STATE_STATE_RxIdle;
-    m_timer0.CC[TS_TIMER_INDEX_RADIO] = TIME_NOW;
 
     p_scanner_packet->packet.header.length = 2;
 
+    m_timer0.CC[SCANNER_TIMER_INDEX] = TIME_UNTIL_END_EVENT;
+
     /* Set up radio_handle_end_event() */
-    ts_timer_to_device_time_ExpectAndReturn(TIME_NOW, TIME_NOW + 100);
+    timeslot_start_time_get_ExpectAndReturn(TIME_NOW);
     packet_buffer_commit_Expect(&m_scanner.packet_buffer,
                                 m_scanner.p_buffer_packet,
                                 SCANNER_PACKET_OVERHEAD +
@@ -810,13 +774,11 @@ void test_radio_irq_handler_WINDOW_END_AFTER_RX(void)
     packet_buffer_commit_IgnoreArg_length();
     bearer_event_flag_set_Expect(BEARER_EVENT_FLAG);
 
-    mesh_pa_lna_cleanup_Expect();
-
     scanner_radio_irq_handler();
 
     /* Verify resulting state */
     TEST_ASSERT_EQUAL(0, m_radio.EVENTS_END);
-    TEST_ASSERT_EQUAL_UINT32(TIME_NOW+100, p_scanner_packet->metadata.timestamp);
+    TEST_ASSERT_EQUAL_UINT32(TIME_NOW + TIME_UNTIL_END_EVENT, p_scanner_packet->metadata.timestamp);
     TEST_ASSERT_EQUAL_UINT32(m_scanner.config.access_addresses[NRF_RADIO->RXMATCH], p_scanner_packet->metadata.access_addr);
     TEST_ASSERT_EQUAL_UINT8(DATAWHITEIV_VALUE & 0x3F, p_scanner_packet->metadata.channel);
     TEST_ASSERT_EQUAL_INT8(-RSSISAMPLE_VALUE, p_scanner_packet->metadata.rssi);
@@ -851,13 +813,11 @@ void test_radio_irq_handler_CTX_ENABLE_WINDOW_START(void)
     radio_config_reset_Expect();
     radio_config_config_Expect(&m_scanner.config.radio_config);
     radio_config_access_addr_set_Expect(BEARER_ACCESS_ADDR_DEFAULT, 0);
-
-    scanner_radio_start(TIME_NOW);
+    scanner_radio_start();
 
     timer_now_ExpectAndReturn(TIME_NOW);
     timer_sch_abort_Expect(&m_scanner.timer_window_end);
     timer_sch_reschedule_Expect(&m_scanner.timer_window_start, TIME_NOW);
-    bearer_handler_wake_up_Expect();
     scanner_enable();
 
     NVIC_SetPendingIRQ_Expect(RADIO_IRQn);
@@ -872,7 +832,6 @@ void test_radio_irq_handler_CTX_ENABLE_WINDOW_START(void)
     m_radio.PACKETPTR = 0;
     m_radio.TASKS_RXEN = 0;
 
-    expect_lna_setup();
     scanner_radio_irq_handler();
 
     /* Verify resulting state */
@@ -904,9 +863,6 @@ void test_radio_irq_handler_WINDOW_START_DURING_RADIO_RX(void)
     packet_buffer_free_callback_cnt = 0;
     m_radio.PACKETPTR = 0;
     m_radio.TASKS_RXEN = 0;
-
-    mesh_pa_lna_cleanup_Expect();
-    expect_lna_setup();
 
     scanner_radio_irq_handler();
 

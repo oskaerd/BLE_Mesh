@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -37,7 +37,6 @@
 #ifndef CORE_TX_INSTABURST_H__
 #define CORE_TX_INSTABURST_H__
 #include "core_tx.h"
-#include "radio_config.h"
 
 /**
  * @defgroup CORE_TX_INSTABURST Core TX Instaburst bearer
@@ -55,10 +54,21 @@
 void core_tx_instaburst_init(void);
 
 /**
- * Checks if the advertiser for the given role is enabled.
+ * Sets the advertisement interval for the specific role.
+ *
+ * @param[in] role Role to set the advertisement interval for.
+ * @param[in] interval_ms Advertisement interval in milliseconds.
  */
-bool core_tx_instaburst_is_enabled(core_tx_role_t role);
+void core_tx_instaburst_interval_set(core_tx_role_t role, uint32_t interval_ms);
 
+/**
+ * Gets the advertisement interval in milliseconds for the given role.
+ *
+ * @param[in] role Role to get the advertisement interval for.
+ *
+ * @returns The advertisement interval for the given role in milliseconds.
+ */
+uint32_t core_tx_instaburst_interval_get(core_tx_role_t role);
 
 /** @} */
 

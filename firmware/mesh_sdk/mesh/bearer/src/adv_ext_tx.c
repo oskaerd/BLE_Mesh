@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -41,12 +41,8 @@
 #include "debug_pins.h"
 #include "nordic_common.h"
 #include "nrf_mesh_config_bearer.h"
-#include "mesh_pa_lna_internal.h"
 
-#define ADV_EXT_TIMER_INDEX_TIMESTAMP       (0) /**< Timer index used to control radio timing. */
-#define ADV_EXT_TIMER_INDEX_PA              (1) /**< Timer index used to control power amplifier. */
-#define ADV_EXT_TIMER_INDEX_RADIO_TRIGGER   (TS_TIMER_INDEX_RADIO) /**< Timer index used to control radio timing. */
-#define ADV_EXT_PPI_CH                      (TS_TIMER_PPI_CH_START + TS_TIMER_INDEX_RADIO) /**< PPI channel used to trigger timer capture */
+#define ADV_EXT_TIMER_INDEX  (TIMER_INDEX_RADIO) /**< Timer index used to control radio timing. */
 
 /* Timing */
 #define OFFSET_TIME_STEP_US    (ADV_EXT_TIME_OFFSET_UNIT_30us) /**< Offset unit used in all AuxPtr packets */
@@ -84,15 +80,19 @@ NRF_MESH_STATIC_ASSERT(ADV_EXT_TX_AUX_ADV_IND_OVERHEAD(true)    <= ADV_EXT_TX_AD
 NRF_MESH_STATIC_ASSERT(ADV_EXT_TX_AUX_ADV_IND_OVERHEAD(false)   <= ADV_EXT_TX_ADV_EXT_HEADER_OVERHEAD_MAX);
 NRF_MESH_STATIC_ASSERT(ADV_EXT_TX_AUX_CHAIN_IND_OVERHEAD(false) <= ADV_EXT_TX_ADV_EXT_HEADER_OVERHEAD_MAX);
 NRF_MESH_STATIC_ASSERT(ADV_EXT_TX_AUX_CHAIN_IND_OVERHEAD(true)  <= ADV_EXT_TX_ADV_EXT_HEADER_OVERHEAD_MAX);
-
-/* Radio configuration for ADV EXT IND packets */
-#define ADV_EXT_IND_PAYLOAD_MAXLEN  RADIO_CONFIG_ADV_MAX_PAYLOAD_SIZE
-#define ADV_EXT_IND_RADIO_MODE      RADIO_MODE_BLE_1MBIT
 /*****************************************************************************
 * Static globals
 *****************************************************************************/
 /** Packet buffer for the ADV EXT IND packets. */
 static uint8_t m_adv_ext_ind[sizeof(ble_packet_hdr_t) + ADV_EXT_TX_ADV_EXT_IND_OVERHEAD];
+
+/** Radio configuration for the ADV EXT IND packets. */
+static const radio_config_t m_adv_ext_ind_radio_config =
+{
+    .tx_power = RADIO_POWER_NRF_0DBM,
+    .payload_maxlen = RADIO_CONFIG_ADV_MAX_PAYLOAD_SIZE,
+    .radio_mode = RADIO_MODE_BLE_1MBIT
+};
 
 typedef enum
 {
@@ -109,12 +109,11 @@ static struct
     uint8_t adv_index;
     uint8_t packet_index;
     adv_ext_tx_packet_t * p_tx_packet;
-    ts_timestamp_t start_time;
 } m_tx_session;
 
 /** Time to start radio TX for the current auxiliary packet, as reported in the Aux Ptr pointing to
  * the packet. */
-static ts_timestamp_t m_tx_time;
+static uint32_t m_tx_time;
 
 /** Advertisement channels for the EXT IND packets. */
 static const uint8_t m_adv_channels[] = NRF_MESH_ADV_CHAN_ALL;
@@ -229,10 +228,7 @@ static void setup_adv_ext_ind(adv_ext_tx_t * p_tx)
         case TX_STATE_SEND_ADV_EXT_IND_FIRST:
             radio_config_channel_set(m_adv_channels[m_tx_session.adv_index]);
 
-            BEARER_ACTION_TIMER->TASKS_CAPTURE[ADV_EXT_TIMER_INDEX_PA] = 1;
             NRF_RADIO->TASKS_TXEN = 1;
-
-            mesh_pa_setup_start(BEARER_ACTION_TIMER->CC[ADV_EXT_TIMER_INDEX_PA] + 1, ADV_EXT_TIMER_INDEX_PA);
 
             NRF_RADIO->EVENTS_READY = 0;
             (void) NRF_RADIO->EVENTS_READY;
@@ -247,17 +243,16 @@ static void setup_adv_ext_ind(adv_ext_tx_t * p_tx)
 
             /* Get reference point for time offset. Will re-trigger on every READY event, to make
              * the final adv ext ind the counting timestamp. */
-            NRF_PPI->CH[ADV_EXT_PPI_CH].EEP = (uint32_t) &NRF_RADIO->EVENTS_READY;
-            NRF_PPI->CH[ADV_EXT_PPI_CH].TEP = (uint32_t) &BEARER_ACTION_TIMER->TASKS_CAPTURE[ADV_EXT_TIMER_INDEX_TIMESTAMP];
-            NRF_PPI->CHENSET = (1UL << ADV_EXT_PPI_CH);
+            NRF_PPI->CH[TIMER_PPI_CH_START + ADV_EXT_TIMER_INDEX].EEP = (uint32_t) &NRF_RADIO->EVENTS_READY;
+            NRF_PPI->CH[TIMER_PPI_CH_START + ADV_EXT_TIMER_INDEX].TEP = (uint32_t) &NRF_TIMER0->TASKS_CAPTURE[ADV_EXT_TIMER_INDEX];
+            NRF_PPI->CHENSET = (1UL << (TIMER_PPI_CH_START + ADV_EXT_TIMER_INDEX));
             break;
 
         case TX_STATE_SEND_ADV_EXT_IND_FOLLOW_UP:
             /* If we're not in rampup state at this point, we modified the radio packet while it was
              * on air. This can happen if some other process prevented the radio interrupt from
-             * firing for over 35us. */
+             * firing for over 130us. */
             NRF_MESH_ASSERT(NRF_RADIO->STATE == RADIO_STATE_STATE_TxRu);
-            mesh_pa_lna_disable_start();
             break;
 
         default:
@@ -275,7 +270,6 @@ static void setup_adv_ext_ind(adv_ext_tx_t * p_tx)
     {
         m_tx_session.state = TX_STATE_SEND_AUX_ADV_FIRST;
         NRF_RADIO->SHORTS &= ~RADIO_SHORTS_DISABLED_TXEN_Msk;
-        mesh_pa_lna_setup_stop();
     }
     DEBUG_PIN_INSTABURST_OFF(DEBUG_PIN_INSTABURST_SETUP_ADV_EXT_IND);
 }
@@ -302,19 +296,15 @@ static void setup_aux(adv_ext_tx_t * p_tx)
 
     NRF_RADIO->PACKETPTR = (uint32_t) p_packet;
 
-    const uint32_t txen_trigger_time = m_tx_time - RADIO_RAMPUP_TIME - m_tx_session.start_time;
+    const uint32_t txen_trigger_time = m_tx_time - RADIO_RAMPUP_TIME;
 
-    BEARER_ACTION_TIMER->CC[ADV_EXT_TIMER_INDEX_RADIO_TRIGGER] = txen_trigger_time;
-    BEARER_ACTION_TIMER->EVENTS_COMPARE[ADV_EXT_TIMER_INDEX_RADIO_TRIGGER] = 0;
-    NRF_PPI->CH[ADV_EXT_PPI_CH].EEP = (uint32_t) &BEARER_ACTION_TIMER->EVENTS_COMPARE[ADV_EXT_TIMER_INDEX_RADIO_TRIGGER];
-    NRF_PPI->CH[ADV_EXT_PPI_CH].TEP = (uint32_t) &NRF_RADIO->TASKS_TXEN;
-    NRF_PPI->CHENSET = (1UL << ADV_EXT_PPI_CH);
-
-    mesh_pa_setup_start(txen_trigger_time, ADV_EXT_TIMER_INDEX_PA);
-    mesh_pa_lna_setup_stop();
+    NRF_MESH_ERROR_CHECK(timer_order_ppi(ADV_EXT_TIMER_INDEX,
+                                         txen_trigger_time,
+                                         (uint32_t *) &NRF_RADIO->TASKS_TXEN,
+                                         TIMER_ATTR_TIMESLOT_LOCAL));
 
     /* Verify that we were able to service the TX in time */
-    NRF_MESH_ASSERT(TIMER_OLDER_THAN(ts_timer_now(), txen_trigger_time + m_tx_session.start_time));
+    NRF_MESH_ASSERT(TIMER_OLDER_THAN(timer_now(), txen_trigger_time));
 
     if (last_in_chain)
     {
@@ -327,26 +317,31 @@ static void setup_aux(adv_ext_tx_t * p_tx)
     }
 }
 
-static void action_start(ts_timestamp_t start_time, void * p_args)
+static void action_start(timestamp_t start_time, void * p_args)
 {
     DEBUG_PIN_INSTABURST_ON(DEBUG_PIN_INSTABURST_START);
     DEBUG_PIN_INSTABURST_ON(DEBUG_PIN_INSTABURST_IN_ACTION);
     adv_ext_tx_t * p_tx = p_args;
 
+#ifdef DEBUG_PINS_ENABLED
+    /* Enable radio active state debug pins */
+    NRF_GPIOTE->CONFIG[1] = (GPIOTE_CONFIG_MODE_Task << GPIOTE_CONFIG_MODE_Pos) |
+                            (GPIOTE_CONFIG_OUTINIT_Low << GPIOTE_CONFIG_OUTINIT_Pos) |
+                            (GPIOTE_CONFIG_POLARITY_Toggle << GPIOTE_CONFIG_POLARITY_Pos) |
+                            (DEBUG_PIN_INSTABURST_RADIO_ACTIVE << GPIOTE_CONFIG_PSEL_Pos);
+    NRF_PPI->CH[2].EEP = (uint32_t) &NRF_RADIO->EVENTS_READY;
+    NRF_PPI->CH[2].TEP = (uint32_t) &NRF_GPIOTE->TASKS_OUT[1];
+    NRF_PPI->CH[3].EEP = (uint32_t) &NRF_RADIO->EVENTS_END;
+    NRF_PPI->CH[3].TEP = (uint32_t) &NRF_GPIOTE->TASKS_OUT[1];
+    NRF_PPI->CHENSET   = (1UL << 2) | (1UL << 3);
+#endif
+
     m_tx_session.state = TX_STATE_SEND_ADV_EXT_IND_FIRST;
     m_tx_session.adv_index = 0;
-    m_tx_session.start_time = start_time;
 
     /* Send first advertisement */
-    radio_config_t radio_config =
-    {
-        .tx_power = p_tx->config.radio_config.tx_power,
-        .payload_maxlen = ADV_EXT_IND_PAYLOAD_MAXLEN,
-        .radio_mode = ADV_EXT_IND_RADIO_MODE
-    };
-
     radio_config_reset();
-    radio_config_config(&radio_config);
+    radio_config_config(&m_adv_ext_ind_radio_config);
     radio_config_access_addr_set(BEARER_ACCESS_ADDR_DEFAULT, 0);
 
     setup_adv_ext_ind(p_tx);
@@ -373,7 +368,7 @@ static void radio_irq_handler(void * p_args)
         case TX_STATE_SEND_AUX_ADV_FIRST:
             m_tx_session.p_tx_packet = (adv_ext_tx_packet_t *) &p_tx->p_tx_event->packet_data[0];
             m_tx_session.packet_index = 0;
-            m_tx_time = m_tx_session.start_time + BEARER_ACTION_TIMER->CC[ADV_EXT_TIMER_INDEX_TIMESTAMP] + OFFSET_TIME_MIN_US;
+            m_tx_time = timeslot_start_time_get() + NRF_TIMER0->CC[ADV_EXT_TIMER_INDEX] + OFFSET_TIME_MIN_US;
             setup_aux(p_tx);
             break;
 
@@ -386,19 +381,16 @@ static void radio_irq_handler(void * p_args)
         case TX_STATE_END:
         {
             DEBUG_PIN_INSTABURST_OFF(DEBUG_PIN_INSTABURST_IN_ACTION);
-
-            mesh_pa_lna_cleanup();
-
             bearer_handler_action_end();
 
             const adv_ext_tx_event_t * p_tx_event = p_tx->p_tx_event;
             p_tx->p_tx_event = NULL;
             if (p_tx->config.callback != NULL)
             {
-                ts_timestamp_t header_start_time =
+                uint32_t header_start_time =
                     m_tx_time + RADIO_ADDR_EVT_DELAY(p_tx->config.radio_config.radio_mode);
-                /* Report the TX complete with a device timestamp, not a timeslot timestamp */
-                p_tx->config.callback(p_tx, p_tx_event, ts_timer_to_device_time(header_start_time));
+
+                p_tx->config.callback(p_tx, p_tx_event, header_start_time);
             }
             break;
         }

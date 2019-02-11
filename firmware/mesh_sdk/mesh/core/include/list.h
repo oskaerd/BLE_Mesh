@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -52,7 +52,7 @@
  */
 
 /**
- * Declares a for-loop for iterating linked lists.
+ * Declears a for-loop for iterating linked lists.
  *
  * @param[in] ITEM Item pointer variable name.
  * @param[in] LIST Pointer to the head of the linked list.

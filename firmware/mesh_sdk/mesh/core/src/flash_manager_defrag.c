@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -62,13 +62,13 @@
  *    procedure.
  * 6. Erase source: Erase the source page to prepare for write back.
  * 7. Write back: Write the contents of the recovery area back to the target page.
- * 8. Invalidate duplicate entries: While taking a copy of the target page, we might have ran over
+ * 8. Seal storage page: Put an "end" entry at the end of the storage page, to indicate that there
+ *    are no more entries in this page. This makes iteration through the entries easier at a later
+ *    stage.
+ * 9. Invalidate duplicate entries: While taking a copy of the target page, we might have ran over
  *    to the next page, and copied those entries too. If this is the case, those entries would have
  *    been duplicated when we copied it back in step 7. Invalidate all entries that are present
  *    both in the recovery area, and the pages after the target page.
- * 9. Seal storage page: Put an "end" entry at the end of the storage page, to indicate that there
- *    are no more entries in this page. If the previous step found that there will be more entries
- *    after the end, we'll pad the page, otherwise, we'll mark it as the end of the area.
  * 10. Post process: Cleanup our state, and move on to the next page. If there are no more pages to
  *    backup, we erase the defrag start pointer from the recovery area, and end the procedure.
  *
@@ -244,6 +244,7 @@ static procedure_action_t copy_metadata(void)
         /* ready to start copying entries */
         m_defrag.p_dst = (const fm_entry_t *) &mp_recovery_area->data[metadata_length / sizeof(mp_recovery_area->data[0])];
         m_defrag.p_src = get_first_entry(m_defrag.p_storage_page);
+        m_defrag.found_all_entries = false;
         return PROCEDURE_CONTINUE;
     }
     else
@@ -264,7 +265,7 @@ static procedure_action_t backup_entries(void)
     bool recovery_page_is_full = false;
     /* Copy entries in chunks of sequential data-entries until we get to the end or are unable to
        fit any more in the recovery page. */
-    while (!recovery_page_is_full)
+    while (!m_defrag.found_all_entries && !recovery_page_is_full)
     {
         fm_entry_chunk_t chunk;
         uint32_t remaining_space = (PAGE_START_ALIGN(m_defrag.p_dst) + PAGE_SIZE) - (uint32_t) m_defrag.p_dst;
@@ -295,7 +296,7 @@ static procedure_action_t backup_entries(void)
         /* Getting a NULL return from the chunk getter means there were no more valid data chunks left. */
         if (p_next == NULL || p_next->header.handle == HANDLE_SEAL)
         {
-            break;
+            m_defrag.found_all_entries = true;
         }
     }
 
@@ -345,6 +346,42 @@ static procedure_action_t write_back(void)
 }
 
 /**
+ * Write a seal or padding entry at the end of the current storage page.
+ */
+static procedure_action_t seal_storage_page(void)
+{
+    /* Put seal at the first blank header: */
+    const fm_entry_t * p_seal_location = entry_get(get_first_entry(m_defrag.p_storage_page),
+                                                   m_defrag.p_storage_page + 1,
+                                                   HANDLE_BLANK);
+    if (p_seal_location == NULL || p_seal_location == get_first_entry(m_defrag.p_storage_page))
+    {
+        /* Don't seal if the target page is either completely full or completely empty. */
+        return PROCEDURE_CONTINUE;
+    }
+    /* If there are more entries in the area, pad the page, else seal it. */
+    const fm_header_t * p_header;
+    if (m_defrag.found_all_entries)
+    {
+        p_header = &SEAL_HEADER;
+    }
+    else
+    {
+        p_header = &PADDING_HEADER;
+    }
+
+    if (flash(p_seal_location, p_header, sizeof(fm_header_t), &m_token) == NRF_SUCCESS)
+    {
+        m_defrag.wait_for_idle = true;
+        return PROCEDURE_CONTINUE;
+    }
+    else
+    {
+        return PROCEDURE_STAY;
+    }
+}
+
+/**
  * Step through the entries on the page AFTER the one we're recovering, and
  * remove any entries that also occur in the backup, as these are duplicates.
  */
@@ -354,7 +391,6 @@ static procedure_action_t invalidate_duplicate_entries(void)
         m_defrag.p_storage_page->metadata.pages_in_area - 1)
     {
         /* The current page was the last page in the area, and there won't be any duplicates. */
-        m_defrag.found_all_entries = true;
         return PROCEDURE_CONTINUE;
     }
 
@@ -392,48 +428,7 @@ static procedure_action_t invalidate_duplicate_entries(void)
 
         p_area_entry = get_next_data_entry(p_area_entry, p_end);
     }
-
-    /* If we ran out of recovery entries before running out of area entries, the recovery
-     * doesn't contain all remaining entries. */
-    m_defrag.found_all_entries = (p_area_entry == NULL);
-
     return PROCEDURE_CONTINUE;
-}
-
-/**
- * Write a seal or padding entry at the end of the current storage page.
- */
-static procedure_action_t seal_storage_page(void)
-{
-    /* Put seal at the first blank header: */
-    const fm_entry_t * p_seal_location = entry_get(get_first_entry(m_defrag.p_storage_page),
-                                                   m_defrag.p_storage_page + 1,
-                                                   HANDLE_BLANK);
-    if (p_seal_location == NULL || p_seal_location == get_first_entry(m_defrag.p_storage_page))
-    {
-        /* Don't seal if the target page is either completely full or completely empty. */
-        return PROCEDURE_CONTINUE;
-    }
-
-    const fm_header_t * p_header;
-    if (m_defrag.found_all_entries)
-    {
-        p_header = &SEAL_HEADER;
-    }
-    else
-    {
-        p_header = &PADDING_HEADER;
-    }
-
-    if (flash(p_seal_location, p_header, sizeof(fm_header_t), &m_token) == NRF_SUCCESS)
-    {
-        m_defrag.wait_for_idle = true;
-        return PROCEDURE_CONTINUE;
-    }
-    else
-    {
-        return PROCEDURE_STAY;
-    }
 }
 
 static procedure_action_t post_process(void)
@@ -469,8 +464,8 @@ static const defrag_procedure_step_t m_procedure_steps[] =
     write_defrag_start_pointer,
     erase_source,
     write_back,
-    invalidate_duplicate_entries,
     seal_storage_page,
+    invalidate_duplicate_entries,
     post_process
 };
 /*****************************************************************************
@@ -589,10 +584,10 @@ static bool recover_defrag_progress(void)
 
 bool flash_manager_defrag_init(void)
 {
+    flash_manager_recovery_area_t * p_flash_end;
 #ifdef FLASH_MANAGER_RECOVERY_PAGE
     mp_recovery_area = (flash_manager_recovery_area_t *) FLASH_MANAGER_RECOVERY_PAGE;
 #else
-    flash_manager_recovery_area_t * p_flash_end;
     if (BOOTLOADERADDR() != BLANK_FLASH_WORD &&
         BOOTLOADERADDR() != 0)
     {
@@ -608,7 +603,7 @@ bool flash_manager_defrag_init(void)
         p_flash_end = (flash_manager_recovery_area_t *) DEVICE_FLASH_END_GET();
     }
     /* Recovery area is last page of application controlled flash */
-    mp_recovery_area = p_flash_end - FLASH_MANAGER_RECOVERY_PAGE_OFFSET_PAGES - 1; /* pointer arithmetic */
+    mp_recovery_area = p_flash_end - 1 ; /* pointer arithmetic */
 #endif
 
     return recover_defrag_progress();

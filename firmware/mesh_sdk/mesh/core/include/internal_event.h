@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -47,8 +47,7 @@
 
 /**
  * @defgroup INTERNAL_EVT Internal event module
- * @ingroup NRF_MESH
- * Module for reporting internal stack events, to help traceability and debugging.
+ * @ingroup MESH_CORE
  * @{
  */
 
@@ -67,7 +66,6 @@ typedef enum
     INTERNAL_EVENT_FM_ACTION,            /**< Flash Manager Action Completed. */
     INTERNAL_EVENT_FM_DEFRAG,            /**< Flash Manager Defrag Completed. */
     INTERNAL_EVENT_SAR_SUCCESS,          /**< SAR transaction cancelled. */
-    INTERNAL_EVENT_NET_PACKET_RECEIVED,  /**< Network layer packet data used for PTS. */
 
     /** @internal Largest number in the enum. */
     INTERNAL_EVENT__LAST

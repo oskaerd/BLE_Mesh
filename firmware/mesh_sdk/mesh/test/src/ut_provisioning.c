@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -40,6 +40,9 @@
 #include <unity.h>
 #include <cmock.h>
 #include <stdint.h>
+
+#include "event_mock.h"
+#include "enc_mock.h"
 
 #include "nrf_mesh_prov_bearer.h"
 
@@ -88,6 +91,9 @@ static prov_bearer_t m_bearer;
 
 void setUp(void)
 {
+    event_mock_Init();
+    enc_mock_Init();
+
     m_bearer.node.p_next = NULL;
     m_bearer.bearer_type = NRF_MESH_PROV_BEARER_ADV;
     m_bearer.p_interface = &m_interface;
@@ -101,6 +107,10 @@ void setUp(void)
 
 void tearDown(void)
 {
+    event_mock_Verify();
+    event_mock_Destroy();
+    enc_mock_Verify();
+    enc_mock_Destroy();
 }
 
 /********** Callbacks ***********/
@@ -269,7 +279,7 @@ void test_prov_tx(void)
     /* Invite */
     prov_pdu_invite_t invite_pdu;
     invite_pdu.pdu_type = PROV_PDU_TYPE_INVITE;
-    invite_pdu.attention_duration_s = 0x29; //arbitrary 8 bit number
+    invite_pdu.attention_duration = 0x29; //arbitrary 8 bit number
     uint8_t confirmation_inputs[17];
     memset(confirmation_inputs, 0xFE, 17);
 
@@ -284,7 +294,7 @@ void test_prov_tx(void)
     prov_pdu_caps_t capabilities_pdu;
     capabilities_pdu.pdu_type = PROV_PDU_TYPE_CAPABILITIES;
     capabilities_pdu.algorithms = 0x1234;
-    capabilities_pdu.num_elements = 99;
+    capabilities_pdu.num_components = 99;
     capabilities_pdu.oob_input_actions = 0x5678;
     capabilities_pdu.oob_input_size = 88;
     capabilities_pdu.oob_output_actions = 0x9ABC;
@@ -460,52 +470,3 @@ void test_length_check(void)
     }
 }
 
-void test_prov_data_check(void)
-{
-    nrf_mesh_prov_provisioning_data_t prov_data = {
-        .netkey = {0},
-        .netkey_index = NRF_MESH_GLOBAL_KEY_INDEX_MAX + 1,
-        .iv_index = 0,
-        .address = 0,
-        .flags = {
-            .iv_update = 0,
-            .key_refresh = 0
-        }
-    };
-
-    /* Invalid address and netkey_index. */
-    TEST_ASSERT_FALSE(prov_data_is_valid(&prov_data));
-
-    /* Invalid address */
-    prov_data.netkey_index = NRF_MESH_GLOBAL_KEY_INDEX_MAX;
-    TEST_ASSERT_FALSE(prov_data_is_valid(&prov_data));
-
-    /* Valid address and netkey_index => success! */
-    prov_data.address = 1;
-    TEST_ASSERT_TRUE(prov_data_is_valid(&prov_data));
-}
-
-void test_prov_address_check(void)
-{
-    nrf_mesh_prov_provisioning_data_t prov_data = {
-        .netkey = {0},
-        .netkey_index = NRF_MESH_GLOBAL_KEY_INDEX_MAX,
-        .iv_index = 0,
-        .address = 0,
-        .flags = {
-            .iv_update = 0,
-            .key_refresh = 0
-        }
-    };
-
-    /* Invalid address. */
-    TEST_ASSERT_FALSE(prov_address_is_valid(&prov_data, 1));
-
-    /* Largest possible unicast address */
-    prov_data.address = 0x7FFF;
-    TEST_ASSERT_TRUE(prov_address_is_valid(&prov_data, 1));
-
-    /* Overflow */
-    prov_data.address = 0x7FFE;
-    TEST_ASSERT_FALSE(prov_address_is_valid(&prov_data, 3));
-}

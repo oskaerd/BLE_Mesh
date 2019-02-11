@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -82,6 +82,7 @@
 } while (0)
 #define TEST_ASSERT_EQUAL_transport_control_packet_t(expected, actual) UNITY_TEST_ASSERT_EQUAL_transport_control_packet_t(expected, actual, __LINE__, "")
 
+
 #define UNITY_TEST_ASSERT_EQUAL_network_packet_metadata_t(expected, actual, line, message) do { \
         UNITY_TEST_ASSERT_EQUAL_HEX16((expected).src, (actual).src, line, message); \
         UNITY_TEST_ASSERT_EQUAL_HEX16((expected).dst.value, (actual).dst.value, line, message); \
@@ -92,30 +93,6 @@
         UNITY_TEST_ASSERT_EQUAL_PTR((expected).p_security_material, (actual).p_security_material, line, message); \
     } while (0)
 #define TEST_ASSERT_EQUAL_network_packet_metadata_t(expected, actual) UNITY_TEST_ASSERT_EQUAL_network_packet_metadata_t(expected, actual, __LINE__, "")
-
-#define UNITY_TEST_ASSERT_EQUAL_heartbeat_publication_state_t(expected, actual, line, message)                              \
-    do                                                                                                                      \
-    {                                                                                                                       \
-        UNITY_TEST_ASSERT_EQUAL_HEX16((expected).dst, (actual).dst, line, "publication::dst");                              \
-        UNITY_TEST_ASSERT_EQUAL_UINT32((expected).count, (actual).count, line, "publication::count");                       \
-        UNITY_TEST_ASSERT_EQUAL_UINT32((expected).period, (actual).period, line, "publication::period");                    \
-        UNITY_TEST_ASSERT_EQUAL_UINT8((expected).ttl, (actual).ttl, line, "publication::ttl");                              \
-        UNITY_TEST_ASSERT_EQUAL_HEX16((expected).features, (actual).features, line, "publication::features");               \
-        UNITY_TEST_ASSERT_EQUAL_UINT16((expected).netkey_index, (actual).netkey_index, line, "publication::netkey_index");  \
-    } while (0)
-#define TEST_ASSERT_EQUAL_heartbeat_publication_state_t(expected, actual) UNITY_TEST_ASSERT_EQUAL_heartbeat_publication_state_t(expected, actual, __LINE__, "")
-
-#define UNITY_TEST_ASSERT_EQUAL_heartbeat_subscription_state_t(expected, actual, line, message)                      \
-    do                                                                                                               \
-    {                                                                                                                \
-        UNITY_TEST_ASSERT_EQUAL_HEX16((expected).src, (actual).src, line, "subscription::src");                      \
-        UNITY_TEST_ASSERT_EQUAL_HEX16((expected).dst, (actual).dst, line, "subscription::dst");                      \
-        UNITY_TEST_ASSERT_EQUAL_UINT32((expected).count, (actual).count, line, "subscription::count");               \
-        UNITY_TEST_ASSERT_EQUAL_UINT32((expected).period, (actual).period, line, "subscription::period");            \
-        UNITY_TEST_ASSERT_EQUAL_UINT16((expected).min_hops, (actual).min_hops, line, "subscription::min_hops");      \
-        UNITY_TEST_ASSERT_EQUAL_UINT16((expected).max_hops, (actual).max_hops, line, "subscription::max_hops");      \
-    } while (0)
-#define TEST_ASSERT_EQUAL_heartbeat_subscription_state_t(expected, actual) UNITY_TEST_ASSERT_EQUAL_heartbeat_subscription_state_t(expected, actual, __LINE__, "")
 
 /**
  * nrf_mesh_evt_t. Only the events that are actually used are included, will assert if you try to
@@ -174,71 +151,6 @@
                                             line,                                                  \
                                             message);                                              \
                 break;                                                                             \
-            case NRF_MESH_EVT_NET_BEACON_RECEIVED:                                                 \
-                UNITY_TEST_ASSERT_EQUAL_PTR((expected).params.net_beacon.p_beacon_info,            \
-                                            (actual).params.net_beacon.p_beacon_info,              \
-                                            line,                                                  \
-                                            message);                                              \
-                UNITY_TEST_ASSERT_EQUAL_PTR((expected).params.net_beacon.p_beacon_secmat,          \
-                                            (actual).params.net_beacon.p_beacon_secmat,            \
-                                            line,                                                  \
-                                            message);                                              \
-                UNITY_TEST_ASSERT_EQUAL_PTR((expected).params.net_beacon.p_rx_metadata,            \
-                                            (actual).params.net_beacon.p_rx_metadata,              \
-                                            line,                                                  \
-                                            message);                                              \
-                UNITY_TEST_ASSERT_EQUAL_INT((expected).params.net_beacon.iv_index,                 \
-                                            (actual).params.net_beacon.iv_index,                   \
-                                            line,                                                  \
-                                            message);                                              \
-                UNITY_TEST_ASSERT_EQUAL_INT((expected).params.net_beacon.flags.iv_update,          \
-                                            (actual).params.net_beacon.flags.iv_update,            \
-                                            line,                                                  \
-                                            message);                                              \
-                UNITY_TEST_ASSERT_EQUAL_INT((expected).params.net_beacon.flags.key_refresh,        \
-                                            (actual).params.net_beacon.flags.key_refresh,          \
-                                            line,                                                  \
-                                            message);                                              \
-                break;                                                                             \
-            case NRF_MESH_EVT_DISABLED:                                                            \
-                /* No parameters */                                                                \
-                break;                                                                             \
-            case NRF_MESH_EVT_HB_SUBSCRIPTION_CHANGE:                                              \
-                if ((expected).params.hb_subscription_change.p_old == NULL)                        \
-                {                                                                                  \
-                    UNITY_TEST_ASSERT_NULL((actual).params.hb_subscription_change.p_old,           \
-                                           line,                                                   \
-                                           message);                                               \
-                }                                                                                  \
-                else                                                                               \
-                {                                                                                  \
-                    UNITY_TEST_ASSERT_NOT_NULL((actual).params.hb_subscription_change.p_old,       \
-                                               line,                                               \
-                                               message);                                           \
-                    UNITY_TEST_ASSERT_EQUAL_heartbeat_subscription_state_t(                        \
-                        *(expected).params.hb_subscription_change.p_old,                           \
-                        *(actual).params.hb_subscription_change.p_old,                             \
-                        line,                                                                      \
-                        message);                                                                  \
-                }                                                                                  \
-                if ((expected).params.hb_subscription_change.p_new == NULL)                        \
-                {                                                                                  \
-                    UNITY_TEST_ASSERT_NULL((actual).params.hb_subscription_change.p_new,           \
-                                           line,                                                   \
-                                           message);                                               \
-                }                                                                                  \
-                else                                                                               \
-                {                                                                                  \
-                    UNITY_TEST_ASSERT_NOT_NULL((actual).params.hb_subscription_change.p_new,       \
-                                               line,                                               \
-                                               message);                                           \
-                    UNITY_TEST_ASSERT_EQUAL_heartbeat_subscription_state_t(                        \
-                        *(expected).params.hb_subscription_change.p_new,                           \
-                        *(actual).params.hb_subscription_change.p_new,                             \
-                        line,                                                                      \
-                        message);                                                                  \
-                }                                                                                  \
-                break;                                                                             \
             default:                                                                               \
             {                                                                                      \
                 char error_msg[256];                                                               \
@@ -247,34 +159,10 @@
                 break;                                                                             \
             }                                                                                      \
         }                                                                                          \
-                                                                                                   \
-    } while (0)
+    \
+} while (0)
 #define TEST_ASSERT_EQUAL_nrf_mesh_evt_t(expected, actual) UNITY_TEST_ASSERT_EQUAL_nrf_mesh_evt_t(expected, actual, __LINE__, "")
 
-
-#define UNITY_TEST_ASSERT_EQUAL_core_tx_alloc_params_t(expected, actual, line, message) do { \
-        UNITY_TEST_ASSERT_EQUAL_INT((expected).role, (actual).role, line, message); \
-        UNITY_TEST_ASSERT_EQUAL_INT((expected).net_packet_len, (actual).net_packet_len, line, message); \
-        UNITY_TEST_ASSERT_EQUAL_network_packet_metadata_t(*(expected).p_metadata, *(actual).p_metadata, line, message); \
-        UNITY_TEST_ASSERT_EQUAL_HEX32((expected).token, (actual).token, line, message); \
-    } while (0)
-#define TEST_ASSERT_EQUAL_core_tx_alloc_params_t(expected, actual) UNITY_TEST_ASSERT_EQUAL_core_tx_alloc_params_t(expected, actual, __LINE__, "")
-
-#define UNITY_TEST_ASSERT_EQUAL_nrf_mesh_address_t(expected, actual, line, message)                \
-    do                                                                                             \
-    {                                                                                              \
-        UNITY_TEST_ASSERT_EQUAL_HEX8((expected).type, (actual).type, line, message);               \
-        UNITY_TEST_ASSERT_EQUAL_HEX16((expected).value, (actual).value, line, message);            \
-        if ((expected).type == NRF_MESH_ADDRESS_TYPE_VIRTUAL)                                      \
-        {                                                                                          \
-            UNITY_TEST_ASSERT_EQUAL_HEX8_ARRAY((expected).p_virtual_uuid,                          \
-                                               (actual).p_virtual_uuid,                            \
-                                               16,                                                 \
-                                               line,                                               \
-                                               message);                                           \
-        }                                                                                          \
-    } while (0)
-#define TEST_ASSERT_EQUAL_nrf_mesh_address_t(expected, actual) UNITY_TEST_ASSERT_EQUAL_nrf_mesh_address_t(expected, actual, __LINE__, "")
 /** @} */
 
 #endif /* TEST_HELPER_H__ */

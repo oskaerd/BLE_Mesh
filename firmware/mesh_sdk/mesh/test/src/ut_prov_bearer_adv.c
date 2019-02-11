@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -35,7 +35,6 @@
  * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "nrf_mesh_prov_bearer_adv.h"
 #include "prov_bearer_adv.h"
 #include "nrf_mesh_prov.h"
 #include "log.h"
@@ -466,11 +465,7 @@ static void tx_link_open(prov_bearer_t * p_bearer, uint8_t * p_uuid, uint32_t li
 
     ALLOC_AND_TX(&p_bearer_adv->advertiser, PROV_ADV_OVERHEAD + PROV_LINK_OPEN_DATA_SIZE, true);
 
-    if (p_bearer_adv->instance_state != PROV_BEARER_ADV_INSTANCE_INITIALIZED)
-    {
-        advertiser_instance_init_ExpectStub(&p_bearer_adv->advertiser, p_bearer_adv->tx_buffer, sizeof(p_bearer_adv->tx_buffer));
-    }
-
+    advertiser_instance_init_ExpectStub(&p_bearer_adv->advertiser, p_bearer_adv->tx_buffer, sizeof(p_bearer_adv->tx_buffer));
     rand_hw_rng_get_Expect((uint8_t*) &p_bearer_adv->link_id, sizeof(p_bearer_adv->link_id));
     timer_now_ExpectAndReturn(1000);
     timer_sch_reschedule_Expect(&p_bearer_adv->link_timeout_event, 1000 + NRF_MESH_PROV_LINK_TIMEOUT_MIN_US);
@@ -498,14 +493,10 @@ static void tx_link_close(prov_bearer_t * p_bearer, nrf_mesh_prov_link_close_rea
 static void listen_start(prov_bearer_t * p_bearer)
 {
     nrf_mesh_prov_bearer_adv_t * p_bearer_adv = PARENT_BY_FIELD_GET(nrf_mesh_prov_bearer_adv_t, prov_bearer, p_bearer);
-    if (p_bearer_adv->instance_state != PROV_BEARER_ADV_INSTANCE_INITIALIZED)
-    {
-        advertiser_instance_init_ExpectStub(&p_bearer_adv->advertiser, p_bearer_adv->tx_buffer, sizeof(p_bearer_adv->tx_buffer));
-    }
-
+    advertiser_instance_init_ExpectStub(&p_bearer_adv->advertiser, p_bearer_adv->tx_buffer, sizeof(p_bearer_adv->tx_buffer));
     advertiser_enable_Expect(&p_bearer_adv->advertiser);
     prov_beacon_unprov_build_ExpectAndReturn(&p_bearer_adv->advertiser, NULL, 0, &m_packet);
-    advertiser_interval_set_Expect(&p_bearer_adv->advertiser, NRF_MESH_PROV_BEARER_ADV_UNPROV_BEACON_INTERVAL_MS);
+    advertiser_interval_set_Expect(&p_bearer_adv->advertiser, NRF_MESH_UNPROV_BEACON_INTERVAL_MS);
     advertiser_packet_send_Expect(&p_bearer_adv->advertiser, &m_packet);
     TEST_ASSERT_EQUAL(NRF_SUCCESS, prov_bearer_adv_listen(p_bearer, NULL, 0, NRF_MESH_PROV_LINK_TIMEOUT_MIN_US));
     TEST_ASSERT_EQUAL(ADVERTISER_REPEAT_INFINITE, m_packet.config.repeats);
@@ -633,12 +624,7 @@ void test_link_establish_active(void)
     /* Try to open a link and we fail due to pacman, the state should not change */
     bearer_adv.state = PROV_BEARER_ADV_STATE_IDLE;
     bearer_adv.link_id = link_id;
-
-    if (bearer_adv.instance_state != PROV_BEARER_ADV_INSTANCE_INITIALIZED)
-    {
-        advertiser_instance_init_ExpectStub(&bearer_adv.advertiser, bearer_adv.tx_buffer, sizeof(bearer_adv.tx_buffer));
-    }
-
+    advertiser_instance_init_ExpectStub(&bearer_adv.advertiser, bearer_adv.tx_buffer, sizeof(bearer_adv.tx_buffer));
     rand_hw_rng_get_Expect((uint8_t*) &bearer_adv.link_id, sizeof(bearer_adv.link_id));
     ALLOC_AND_TX(&bearer_adv.advertiser, PROV_ADV_OVERHEAD + PROV_LINK_OPEN_DATA_SIZE, false);
     TEST_ASSERT_EQUAL(NRF_ERROR_NO_MEM, prov_bearer_adv_link_open(&bearer_adv.prov_bearer, uuid1, NRF_MESH_PROV_LINK_TIMEOUT_MIN_US));
@@ -874,15 +860,6 @@ void test_packet_send(void)
     receive_data_ack(&bearer_adv.prov_bearer, link_id, true);
     curr_transcation++;
 
-    /* Send packets until rollover + 1: */
-    while (curr_transcation != 1)
-    {
-        no_segments = send_data_packet(&bearer_adv.prov_bearer, data, 1);
-        receive_data_ack(&bearer_adv.prov_bearer, link_id, true);
-        curr_transcation = (curr_transcation + 1) & 0x7f; // rolls over at 0x7f
-        TEST_ASSERT_EQUAL(curr_transcation, bearer_adv.transaction_out);
-    }
-
     /* Send the largest possible data packet */
     no_segments = send_data_packet(&bearer_adv.prov_bearer, data, PROV_PAYLOAD_MAX_LENGTH);
     /* transcation no must be incremented for each new transaction */
@@ -1013,18 +990,11 @@ void test_packet_receive(void)
     receive_data(&bearer_adv.prov_bearer, data, PROV_PAYLOAD_MAX_LENGTH, curr_transcation++, link_id);
     TEST_ASSERT_EQUAL(curr_transcation, bearer_adv.transaction_in);
 
-    /* Send packets until the transaction number wraps around */
-    while (curr_transcation != PROVISIONEE_TRANSACTION_START_VALUE)
-    {
-        receive_data(&bearer_adv.prov_bearer, data, PROV_START_PDU_PAYLOAD_MAX_LEN, curr_transcation++, link_id);
-        if (curr_transcation == 0x00)
-        {
-            /* Should roll over to start value */
-            curr_transcation = PROVISIONEE_TRANSACTION_START_VALUE;
-        }
-        TEST_ASSERT_EQUAL(curr_transcation, bearer_adv.transaction_in);
-    }
-
+    /* Bump up the transaction number to a near wrap_around*/
+    bearer_adv.transaction_in = 0xFF;
+    curr_transcation = 0xFF;
+    receive_data(&bearer_adv.prov_bearer, data, PROV_START_PDU_PAYLOAD_MAX_LEN, curr_transcation++, link_id);
+    TEST_ASSERT_EQUAL(curr_transcation, bearer_adv.transaction_in);
     /* Re send the old packet after the wrap around and expect a response but no callback!*/
     ALLOC_AND_TX(&bearer_adv.advertiser, PROV_ADV_OVERHEAD + PROV_TRANS_ACK_DATA_SIZE, true);
     prov_cb_pkt_in_Expect(&bearer_adv.prov_bearer, data, 1);
@@ -1095,11 +1065,10 @@ void test_packet_receive_abnormal(void)
     TEST_ASSERT_EQUAL(1, m_packet.config.repeats);
 
 
-    /* Increment transaction number with more than 1. Should be ignored, and the next expected
-     * transaction number should stay unchanged. */
-    uint8_t invalid_transaction_number = curr_transcation + 1;
-    p_ad_data = get_transaction_start_packet(&data[10], 10, invalid_transaction_number);
-    prov_bearer_adv_packet_in(p_ad_data->data, p_ad_data->length - BLE_AD_DATA_OVERHEAD, &m_dummy_metadata);
+    /* Increment transaction number with a large number, should be OK, and the next expected
+     * transaction number should be incremented. */
+    curr_transcation += 10;
+    receive_data(&bearer_adv.prov_bearer, data, 1, curr_transcation++, link_id);
     TEST_ASSERT_EQUAL(curr_transcation, bearer_adv.transaction_in);
 
     /* Send new data with wrong fcs (CRC)*/

@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -61,7 +61,7 @@ extern jmp_buf assert_jump_buf;
         {                                      \
             (void) func;                       \
             mesh_assert_expect = false;        \
-            TEST_FAIL_MESSAGE("Expected assert");                       \
+            TEST_FAIL();                       \
         }                                      \
     } while (0)
 

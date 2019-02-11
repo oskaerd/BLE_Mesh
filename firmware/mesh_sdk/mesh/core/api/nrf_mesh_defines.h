@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -61,14 +61,14 @@
  * @{
  */
 
-/** Maximum possible segmented payload size (octets). */
+/** Maximum possible segmented payload size. */
 #define NRF_MESH_SEG_PAYLOAD_SIZE_MAX (380)
 
-/** Maximum possible upper transport PDU (payload + MIC) size (octets). */
-#define NRF_MESH_UPPER_TRANSPORT_PDU_SIZE_MAX (384)
-
-/** Maximum useful access unsegmented payload size (octets). */
+/** Maximum possible single segment payload size. */
 #define NRF_MESH_UNSEG_PAYLOAD_SIZE_MAX (11)
+
+/** Size of a single segment in a segmented transfer. */
+#define NRF_MESH_SEG_SIZE (12)
 
 /** All advertisement channels */
 #define NRF_MESH_ADV_CHAN_ALL {37, 38, 39}
@@ -97,11 +97,11 @@
 /** Interval for secure network broadcast beacons, in seconds. */
 #define NRF_MESH_BEACON_SECURE_NET_BCAST_INTERVAL_SECONDS 10
 
-/** Number of periods to keep beacon observations of. */
-#define NRF_MESH_BEACON_OBSERVATION_PERIODS 2
-
 /** Size (in octets) of the unprovisioned beacon URI hash. */
 #define NRF_MESH_BEACON_UNPROV_URI_HASH_SIZE    (4)
+
+/** Default beacon interval. */
+#define BEACON_INTERVAL_MS_DEFAULT (1 * 1000)
 
 /** Size of an ECDH public key. */
 #define NRF_MESH_ECDH_PUBLIC_KEY_SIZE    (64)
@@ -114,18 +114,6 @@
 
 /** Unassigned address. */
 #define NRF_MESH_ADDR_UNASSIGNED                  (0x0000)
-
-/** All-proxies fixed group address. */
-#define NRF_MESH_ALL_PROXIES_ADDR                 (0xFFFC)
-
-/** All-friends fixed group address. */
-#define NRF_MESH_ALL_FRIENDS_ADDR                 (0xFFFD)
-
-/** All-relays fixed group address. */
-#define NRF_MESH_ALL_RELAYS_ADDR                  (0xFFFE)
-
-/** All-nodes fixed group address. */
-#define NRF_MESH_ALL_NODES_ADDR                   (0xFFFF)
 
 /** Offset of bits determining the address type. */
 #define NRF_MESH_ADDR_TYPE_BITS_OFFSET            (14)
@@ -144,7 +132,7 @@
 #if defined(NRF51)
 #define NRF_MESH_IRQ_PRIORITY_LOWEST              (3)
 #else
-#define NRF_MESH_IRQ_PRIORITY_LOWEST              (6)
+#define NRF_MESH_IRQ_PRIORITY_LOWEST              (7)
 #endif
 
 /** @} end of MESH_DEFINES_API */
@@ -165,9 +153,6 @@
 
 /** Maximum allowed number of 10 ms steps for the interval between relayed packet retranmissions. */
 #define NETWORK_RELAY_INTERVAL_STEPS_MAX ((1 << 5) - 1)
-
-/** Maximum allowed relay interval in milliseconds. */
-#define NETWORK_RELAY_INTERVAL_MAX_MS (NETWORK_RELAY_INTERVAL_STEPS_MAX * 10)
 
 /** The minimum time between IV updates, in minutes. */
 #define NETWORK_MIN_IV_UPDATE_INTERVAL_MINUTES (96 * 60)

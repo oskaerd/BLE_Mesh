@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -43,13 +43,12 @@
 #include "access_reliable_mock.h"
 #include "bearer_event_mock.h"
 #include "timer_scheduler_mock.h"
-#include "nrf_mesh_mock.h"
 
 #include "health_messages.h"
 #include "health_opcodes.h"
 #include "health_server.h"
 
-#include "utils.h"
+#include "nordic_common.h"
 
 #define TEST_MODEL_HANDLE   14
 #define TEST_ELEMENT_INDEX  42
@@ -217,8 +216,6 @@ static uint32_t access_model_publish_mock(access_model_handle_t handle, const ac
     TEST_ASSERT_EQUAL(m_publish_expected_opcode, p_message->opcode.opcode);
     TEST_ASSERT_EQUAL(ACCESS_COMPANY_ID_NONE, p_message->opcode.company_id);
     TEST_ASSERT_EQUAL(m_publish_expected_data_length, p_message->length);
-    TEST_ASSERT_EQUAL(false, p_message->force_segmented);
-    TEST_ASSERT_EQUAL(NRF_MESH_TRANSMIC_SIZE_DEFAULT, p_message->transmic_size);
     TEST_ASSERT_EQUAL_HEX8_ARRAY((const uint8_t *) mp_publish_expected_data, p_message->p_buffer, p_message->length);
 
     return NRF_SUCCESS;
@@ -314,13 +311,8 @@ void setUp(void)
     timer_scheduler_mock_Init();
     timer_sch_schedule_StubWithCallback(timer_sch_schedule_mock);
 
-    nrf_mesh_mock_Init();
-    nrf_mesh_unique_token_get_IgnoreAndReturn((nrf_mesh_tx_token_t)0x55AA55AAul);
-
     bearer_event_critical_section_begin_Ignore();
     bearer_event_critical_section_end_Ignore();
-
-    m_publish_period_get_expected = false;
 }
 
 void tearDown(void)
@@ -345,9 +337,6 @@ void tearDown(void)
 
     timer_scheduler_mock_Verify();
     timer_scheduler_mock_Destroy();
-
-    nrf_mesh_mock_Verify();
-    nrf_mesh_mock_Destroy();
 }
 
 /********** Test cases **********/
@@ -360,8 +349,15 @@ void test_faultarray(void)
 
     TEST_ASSERT_EQUAL(0, health_server_fault_count_get(&server));
 
+    /* Cheat, and set the fast period divisor manually to 2 (giving an actual divisor of 2^2): */
+    server.fast_period_divisor = 2;
+
+    /*
+     * The publish interval for the Current Status will be divided by the fast period divisor and a new publish period
+     * will be set when a fault is registered.
+     */
     EXPECT_PUBLISH_PERIOD_GET(server.model_handle, ACCESS_PUBLISH_RESOLUTION_1S, 2);
-    access_model_publish_period_set_ExpectAndReturn(server.model_handle, ACCESS_PUBLISH_RESOLUTION_1S, 2, NRF_SUCCESS);
+    access_model_publish_period_set_ExpectAndReturn(server.model_handle, ACCESS_PUBLISH_RESOLUTION_100MS, 5, NRF_SUCCESS);
 
     health_server_fault_register(&server, 0xf1);
     TEST_ASSERT_EQUAL(1, health_server_fault_count_get(&server));
@@ -385,46 +381,6 @@ void test_faultarray(void)
     TEST_ASSERT_EQUAL(0, health_server_fault_count_get(&server));
     TEST_ASSERT_FALSE(health_server_fault_is_set(&server, 0xf1));
     TEST_ASSERT_FALSE(health_server_fault_is_set(&server, 0x22));
-}
-
-void test_fast_period_divisor(void)
-{
-    health_server_t server;
-    health_server_selftest_t test_array[] = {{ .test_id = 0x01, .selftest_function = selftest_test_function }};
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, health_server_init(&server, TEST_ELEMENT_INDEX, TEST_COMPANY_ID, NULL, test_array, ARRAY_SIZE(test_array)));
-
-    TEST_ASSERT_EQUAL(0, health_server_fault_count_get(&server));
-
-    /* Cheat, and set the fast period divisor manually to 2 (giving an actual divisor of 2^2): */
-    server.fast_period_divisor = 2;
-
-    /*
-     * The publish interval for the Current Status will be divided by the fast period divisor and a new publish period
-     * will be set when a fault is registered.
-     */
-    EXPECT_PUBLISH_PERIOD_GET(server.model_handle, ACCESS_PUBLISH_RESOLUTION_1S, 2);
-    access_model_publish_period_set_ExpectAndReturn(server.model_handle, ACCESS_PUBLISH_RESOLUTION_100MS, 5, NRF_SUCCESS);
-    health_server_fault_register(&server, 0xf1);
-
-    access_model_publish_period_set_ExpectAndReturn(server.model_handle, ACCESS_PUBLISH_RESOLUTION_1S, 2, NRF_SUCCESS);
-    health_server_fault_clear(&server, 0xf1);
-
-    // Try dividing by something that makes the interval go to 0. Should stop at the smallest interval:
-    server.fast_period_divisor = 6; // actual divisor is 2^6 = 64
-    EXPECT_PUBLISH_PERIOD_GET(server.model_handle, ACCESS_PUBLISH_RESOLUTION_1S, 2);
-    access_model_publish_period_set_ExpectAndReturn(server.model_handle, ACCESS_PUBLISH_RESOLUTION_100MS, 1, NRF_SUCCESS);
-    health_server_fault_register(&server, 0xf1);
-
-    access_model_publish_period_set_ExpectAndReturn(server.model_handle, ACCESS_PUBLISH_RESOLUTION_1S, 2, NRF_SUCCESS);
-    health_server_fault_clear(&server, 0xf1);
-
-    // If the period is 0, it should stay 0, and not go up to lower threshold
-    EXPECT_PUBLISH_PERIOD_GET(server.model_handle, ACCESS_PUBLISH_RESOLUTION_100MS, 0);
-    access_model_publish_period_set_ExpectAndReturn(server.model_handle, ACCESS_PUBLISH_RESOLUTION_100MS, 0, NRF_SUCCESS);
-    health_server_fault_register(&server, 0xf1);
-
-    access_model_publish_period_set_ExpectAndReturn(server.model_handle, ACCESS_PUBLISH_RESOLUTION_100MS, 0, NRF_SUCCESS);
-    health_server_fault_clear(&server, 0xf1);
 }
 
 void test_selftest(void)

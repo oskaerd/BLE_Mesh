@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -41,6 +41,7 @@
 
 #include "log.h"
 #include "nrf_mesh.h"
+#include "enc.h"
 
 #include "nrf_mesh_assert.h"
 #include "nrf_mesh_config_prov.h"
@@ -81,11 +82,11 @@ bool prov_packet_length_valid(const uint8_t * p_buffer, uint16_t length)
     return valid;
 }
 
-uint32_t prov_tx_invite(prov_bearer_t * p_bearer, uint8_t attention_duration_s, uint8_t * p_confirmation_inputs)
+uint32_t prov_tx_invite(prov_bearer_t * p_bearer, uint8_t attention_duration, uint8_t * p_confirmation_inputs)
 {
     prov_pdu_invite_t pdu;
     pdu.pdu_type = PROV_PDU_TYPE_INVITE;
-    pdu.attention_duration_s = attention_duration_s;
+    pdu.attention_duration = attention_duration;
 
     /* Copy PDU contents (excluding PDU type) into the confirmation inputs: */
     memcpy(p_confirmation_inputs + PROV_CONFIRM_INPUTS_INVITE_OFFSET, ((const uint8_t *) &pdu) + 1, sizeof(prov_pdu_invite_t) - 1);

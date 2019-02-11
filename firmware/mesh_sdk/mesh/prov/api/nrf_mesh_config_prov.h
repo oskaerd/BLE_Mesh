@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -38,10 +38,6 @@
 #ifndef NRF_MESH_CONFIG_PROV_H__
 #define NRF_MESH_CONFIG_PROV_H__
 
-#ifdef CONFIG_APP_IN_CORE
-#include "nrf_mesh_config_app.h"
-#endif
-
 /**
  * @defgroup NRF_MESH_CONFIG_PROV Provisioning configuration
  * @ingroup MESH_API_GROUP_PROV
@@ -66,35 +62,9 @@
  * @{
  */
 
-/**
- * PB-ADV feature.
- *
- * This feature should normally always be enabled. Without it, a node cannot be
- * provisioned over the advertising bearer. You can disable this feature to save
- * power when the device is acting as a Low Power node.
- */
-#ifndef MESH_FEATURE_PB_ADV_ENABLED
-#define MESH_FEATURE_PB_ADV_ENABLED 1
-#endif
-
-/** PB-GATT feature. To be enabled only in combination with linking GATT files. */
-#ifndef MESH_FEATURE_PB_GATT_ENABLED
-#define MESH_FEATURE_PB_GATT_ENABLED 0
-#endif
-
-/** The default advertisement interval of the unprovisioned beacon. Meant for PB-ADV. */
-#ifndef NRF_MESH_PROV_BEARER_ADV_UNPROV_BEACON_INTERVAL_MS
-#define NRF_MESH_PROV_BEARER_ADV_UNPROV_BEACON_INTERVAL_MS 2000
-#endif
-
-/**
- * The default advertisement interval of the unprovisioned beacon. Meant for PB-GATT.
- *
- * @warning If the advertisement interval is set to below 200 ms, the mesh will not be able to
- * allocate sufficiently large timeslots for its persistent backend from the SoftDevice.
- */
-#ifndef NRF_MESH_PROV_BEARER_GATT_UNPROV_BEACON_INTERVAL_MS
-#define NRF_MESH_PROV_BEARER_GATT_UNPROV_BEACON_INTERVAL_MS 200
+/** Unprovisioned beacon default advertisement interval. */
+#ifndef NRF_MESH_UNPROV_BEACON_INTERVAL_MS
+#define NRF_MESH_UNPROV_BEACON_INTERVAL_MS 2000
 #endif
 
 /** Size of the buffer for the outgoing packet buffer for PB-ADV. */

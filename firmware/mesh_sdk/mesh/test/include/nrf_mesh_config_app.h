@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -52,6 +52,9 @@
 #endif
 #ifndef DEVICE_VERSION_ID
 #define DEVICE_VERSION_ID (0x0000)
+#endif
+#ifndef DEVICE_FEATURES
+#define DEVICE_FEATURES (CONFIG_FEATURE_RELAY_BIT)
 #endif
 
 #ifndef ACCESS_DEFAULT_TTL

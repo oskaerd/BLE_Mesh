@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -34,7 +34,6 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
  * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-
 #include "instaburst_rx.h"
 #include "scanner.h"
 #include "adv_ext_packet.h"
@@ -45,28 +44,35 @@
 #include "bearer_handler.h"
 #include "instaburst_internal.h"
 #include "nrf_mesh_config_bearer.h"
-#include "mesh_pa_lna_internal.h"
-
 /*****************************************************************************
 * Local defines
 *****************************************************************************/
 
-#define M_TIMER_INDEX_RADIO_START 0
-#define M_TIMER_INDEX_RADIO_DISABLE  1
-#define M_TIMER_INDEX_LNA  2
-#define M_TIMER_INDEX_ADDR_TIMESTAMP   M_TIMER_INDEX_RADIO_DISABLE /**< Timestamp index must be the same as the stop index, to disable the stop when a packet is received. */
+#define INSTABURST_TIMER        NRF_TIMER2
+#define INSTABURST_TIMER_INDEX  (TIMER_INDEX_RADIO)
+
 /* PPI indexes used for radio timing: */
-#define PPI_INDEX_RADIO_START           (TS_TIMER_PPI_CH_START)
-#define PPI_INDEX_TIMESTAMP             (TS_TIMER_PPI_CH_START + 1)
-#define PPI_INDEX_RADIO_DISABLE         (TS_TIMER_PPI_CH_START + 2)
+#define PPI_INDEX_SECONDARY_TIMER_START (TIMER_PPI_CH_START)
+#define PPI_INDEX_SECONDARY_TIMER_SAMPLE (TIMER_PPI_CH_START + 1)
+#define PPI_INDEX_RADIO_STOP (TIMER_PPI_CH_START + 3)
 
 /* Debug PPI indexes */
 #define PPI_INDEX_DEBUG_READY 2
 #define PPI_INDEX_DEBUG_TIMEOUT 2
 
+/* As the timer module will allocate the PPI channel corresponding to the timer index ordered when
+ * calling timer_order_ppi(), we have to make sure none of our other PPI channels collide with it:
+ */
+NRF_MESH_STATIC_ASSERT((TIMER_PPI_CH_START + INSTABURST_TIMER_INDEX) !=
+                       PPI_INDEX_SECONDARY_TIMER_START);
+NRF_MESH_STATIC_ASSERT((TIMER_PPI_CH_START + INSTABURST_TIMER_INDEX) !=
+                       PPI_INDEX_SECONDARY_TIMER_SAMPLE);
+NRF_MESH_STATIC_ASSERT((TIMER_PPI_CH_START + INSTABURST_TIMER_INDEX) !=
+                       PPI_INDEX_RADIO_STOP);
+
 #define RX_POST_PROCESS_US     (100) /**< Time spent processing after receiving an auxiliary packet. */
 #define RX_OFFSET_TIME_MAX_US  (3000) /**< Maximum acceptable RX offset time in an AuxPtr. */
-#define START_TIME_OVERHEAD_US (40 + RADIO_RAMPUP_TIME) /**< Expected amount of time to pass from starting the action until the radio is ready */
+#define START_TIME_OVERHEAD_US (160) /**< Expected amount of time to pass from starting the action until the radio is ready */
 
 
 /**
@@ -95,12 +101,11 @@ typedef struct
     struct
     {
         nrf_mesh_instaburst_event_id_t id; /**< Event ID for the current event. */
-        ts_timestamp_t action_start_time; /**< Timestamp marking when the action started. */
+        uint32_t rx_time; /**< RX time of the initial pointer packet. */
         /** Data for the current packet in the current advertising event. */
         struct
         {
-            ts_timestamp_t start_time; /**< Time to start receiving the packet */
-            uint32_t timeslot_index; /**< Index of the timeslot when the packet starts */
+            uint32_t start_time;
             adv_ext_time_offset_unit_t offset_unit;
             uint8_t channel;
             uint8_t index_in_event;
@@ -147,12 +152,6 @@ static void order_rx(const adv_ext_header_aux_ptr_t * p_aux_ptr)
     {
         m_instaburst.state = INSTABURST_RX_STATE_RX_ADV_EXT;
     }
-    else
-    {
-#if INSTABURST_RX_DEBUG
-        m_instaburst.stats[p_aux_ptr->channel_index].busy++;
-#endif
-    }
 }
 
 static inline uint32_t rx_buffer_len_get(uint8_t data_len)
@@ -160,7 +159,7 @@ static inline uint32_t rx_buffer_len_get(uint8_t data_len)
     return offsetof(instaburst_rx_packet_internal_t, buffer.data) + data_len;
 }
 
-static void aux_ptr_handle(const adv_ext_header_aux_ptr_t * p_aux_ptr, ts_timestamp_t packet_address_timestamp, radio_mode_t rx_radio_mode)
+static void aux_ptr_handle(const adv_ext_header_aux_ptr_t * p_aux_ptr, uint32_t packet_address_timestamp, radio_mode_t rx_radio_mode)
 {
     DEBUG_PIN_INSTABURST_ON(DEBUG_PIN_INSTABURST_GOT_ADV_EXT);
 
@@ -172,21 +171,14 @@ static void aux_ptr_handle(const adv_ext_header_aux_ptr_t * p_aux_ptr, ts_timest
          * preamble start on the packet it's pointing to. */
         m_instaburst.event.packet.start_time = packet_address_timestamp + p_aux_ptr->time_offset_us -
                                                RADIO_ADDR_EVT_DELAY(rx_radio_mode);
-        m_instaburst.event.packet.timeslot_index = timeslot_count_get();
         m_instaburst.event.packet.channel = p_aux_ptr->channel_index;
 
         order_rx(p_aux_ptr);
     }
-    else
-    {
-#if INSTABURST_RX_DEBUG
-        m_instaburst.stats[p_aux_ptr->channel_index].invalid_offset++;
-#endif
-    }
     DEBUG_PIN_INSTABURST_OFF(DEBUG_PIN_INSTABURST_GOT_ADV_EXT);
 }
 
-static void scanner_rx_cb(const scanner_packet_t * p_scanner_packet, ts_timestamp_t rx_timestamp_ts)
+static void scanner_rx_cb(const scanner_packet_t * p_scanner_packet)
 {
     if (m_instaburst.state == INSTABURST_RX_STATE_IDLE &&
         p_scanner_packet->packet.header.type == BLE_PACKET_TYPE_ADV_EXT &&
@@ -210,6 +202,7 @@ static void scanner_rx_cb(const scanner_packet_t * p_scanner_packet, ts_timestam
 
                 if (!instaburst_event_id_cache_has_value(&m_instaburst.event.id))
                 {
+                    m_instaburst.event.rx_time               = p_scanner_packet->metadata.timestamp;
                     m_instaburst.event.packet.index_in_event = 0;
 
                     adv_ext_header_aux_ptr_t aux_ptr;
@@ -218,7 +211,7 @@ static void scanner_rx_cb(const scanner_packet_t * p_scanner_packet, ts_timestam
                                                 (adv_ext_header_data_t *) &aux_ptr) == NRF_SUCCESS)
                     {
                         aux_ptr_handle(&aux_ptr,
-                                       rx_timestamp_ts,
+                                       p_scanner_packet->metadata.timestamp,
                                        RADIO_MODE_BLE_1MBIT);
                     }
                 }
@@ -227,21 +220,12 @@ static void scanner_rx_cb(const scanner_packet_t * p_scanner_packet, ts_timestam
     }
 }
 
-static void action_start(ts_timestamp_t start_time, void * p_args)
+static void action_start(timestamp_t start_time, void * p_args)
 {
     DEBUG_PIN_INSTABURST_ON(DEBUG_PIN_INSTABURST_START);
     DEBUG_PIN_INSTABURST_ON(DEBUG_PIN_INSTABURST_IN_ACTION);
 
-    m_instaburst.event.action_start_time = start_time;
-
-    /* The aux ptr timestamp is only valid within the timeslot it was captured in, as the ts_timer
-     * is reset at the beginning of every timeslot. We should abort the action if we're in a
-     * different timeslot than we were when we captured the timestamp, as the reference is no longer
-     * valid. */
-    bool in_same_timeslot = (m_instaburst.event.packet.timeslot_index == timeslot_count_get());
-
-    if (in_same_timeslot &&
-        packet_buffer_reserve(&m_instaburst.packet_buffer,
+    if (packet_buffer_reserve(&m_instaburst.packet_buffer,
                               &m_instaburst.p_rx_buf,
                               rx_buffer_len_get(ADV_EXT_PACKET_LEN_MAX)) == NRF_SUCCESS)
     {
@@ -271,7 +255,7 @@ static void action_start(ts_timestamp_t start_time, void * p_args)
 
         NRF_RADIO->INTENSET = RADIO_INTENSET_DISABLED_Msk;
 
-        if (TIMER_OLDER_THAN(m_instaburst.event.packet.start_time, ts_timer_now() + START_TIME_OVERHEAD_US))
+        if (TIMER_OLDER_THAN(m_instaburst.event.packet.start_time, timer_now() + START_TIME_OVERHEAD_US))
         {
             /* Can't make it in time */
             DEBUG_PIN_INSTABURST_ON(DEBUG_PIN_INSTABURST_TOO_SLOW);
@@ -289,61 +273,99 @@ static void action_start(ts_timestamp_t start_time, void * p_args)
         }
         else
         {
-            /* We need a total of 3 PPIs to run the radio RX timing:
-             * - One to start the radio when the timer expires
-             * - One to stop the radio if it couldn't receive anything
-             * - One to cancel the stop-timer by sampling it (and timestamp the packet).
+            /* As the NRF_TIMER0 doesn't have enough available capture registers, we have to use
+             * NRF_TIMER2 in addition. In order to sync the two timers, we set up a PPI to start
+             * TIMER2 when the radio READY event fires, ie when the radio starts receiving.
+             * TIMER2 is responsible for stopping the radio if the packet reception fails.
+             * Here's a rough version of the timeline for the rx radio timing if no packet is
+             * received:
+             *
+             * TIMER0 ---|=============|------------------------------------
+             *                         | (CC[2])
+             * TIMER2                  |           |=================|------
+             *                         |           ^ (start)         | (CC[0])
+             *                         |           |                 |
+             *                         V (rxen)    | (ready)         V (disable)
+             * RADIO  |RX|             | RAMPUP    | RX              | DISABLED
+             *
+             * If the radio gets an ADDRESS event before the TIMER2->CC[0] signal, TIMER2 will
+             * sample CC[0], effectively cancelling the signal that disables the radio:
+             *
+             * TIMER0 ---|=============|------------------------------------
+             *                         | (CC[2])
+             * TIMER2                  |           |==========|-------------
+             *                         |           ^ (start)  ^ (capture)
+             *                         |           |          |
+             *                         V (rxen)    | (ready)  | (address)
+             * RADIO  |RX|             | RAMPUP    | RX       ^          | (END)
+             *
              */
-
-            /* Start ramping up the radio in time to go active right before the earliest announced time. */
-            ts_timestamp_t rampup_start_time = m_instaburst.event.packet.start_time - RADIO_RAMPUP_TIME - AUX_PACKET_RX_MARGIN_US;
-
+            INSTABURST_TIMER->TASKS_STOP  = 1;
+            INSTABURST_TIMER->TASKS_CLEAR = 1;
+            INSTABURST_TIMER->PRESCALER = 4; // 1MHz
+            INSTABURST_TIMER->BITMODE = TIMER_BITMODE_BITMODE_16Bit;
+            INSTABURST_TIMER->EVENTS_COMPARE[0] = 0;
             /* According to the Bluetooth 5.0 specification, the sender of an extended advertisement
              * event is allowed to start sending anywhere inside the indicated timestep,
-             * i.e. from start_time to start_time + offset_unit. Account for this, as well as for
-             * the delay of the ADDR event and a safety margin.
+             * i.e. from (aux_offset * offset_units) to ((aux_offset + 1) * offset_units). Account
+             * for this, as well as for the delay of the ADDR event and a margin on both the
+             * beginning and the end of the wait.
              */
-            ts_timestamp_t last_addr_time =
-                m_instaburst.event.packet.start_time + m_instaburst.event.packet.offset_unit +
-                RADIO_ADDR_EVT_DELAY(m_instaburst.event.packet.radio_mode) +
-                AUX_PACKET_RX_MARGIN_US;
+            INSTABURST_TIMER->CC[0] = m_instaburst.event.packet.offset_unit +
+                                      RADIO_ADDR_EVT_DELAY(m_instaburst.event.packet.radio_mode) +
+                                      (AUX_PACKET_RX_MARGIN_US * 2);
 
-            BEARER_ACTION_TIMER->CC[M_TIMER_INDEX_RADIO_START]   = rampup_start_time - m_instaburst.event.action_start_time;
-            BEARER_ACTION_TIMER->CC[M_TIMER_INDEX_RADIO_DISABLE] = last_addr_time - m_instaburst.event.action_start_time;
+            /* We need a total of 4 PPIs to run the radio RX timing:
+             * - One to start the radio when the timer expires
+             * - One to start the secondary timer when the radio starts
+             * - One to stop the radio if it couldn't receive anything
+             * - One to cancel the stop-timer by sampling it.
+             */
 
-            NRF_PPI->CH[PPI_INDEX_RADIO_START].EEP = (uint32_t) &BEARER_ACTION_TIMER->EVENTS_COMPARE[M_TIMER_INDEX_RADIO_START];
-            NRF_PPI->CH[PPI_INDEX_RADIO_START].TEP = (uint32_t) &NRF_RADIO->TASKS_RXEN;
-
-            NRF_PPI->CH[PPI_INDEX_RADIO_DISABLE].EEP = (uint32_t) &BEARER_ACTION_TIMER->EVENTS_COMPARE[M_TIMER_INDEX_RADIO_DISABLE];
-            NRF_PPI->CH[PPI_INDEX_RADIO_DISABLE].TEP = (uint32_t) &NRF_RADIO->TASKS_DISABLE;
-
-            /* Sampling the timer will annul the CC value previously setup to cancel the radio, as
-             * it overwrites the register. By setting a PPI from the ADDRESS event to the
-             * timer capture, we make the timer overwrite its own CC register when the packet is
-             * successfully received, preventing the timer from firing. */
-            NRF_PPI->CH[PPI_INDEX_TIMESTAMP].EEP = (uint32_t) &NRF_RADIO->EVENTS_ADDRESS;
-            NRF_PPI->CH[PPI_INDEX_TIMESTAMP].TEP = (uint32_t) &BEARER_ACTION_TIMER->TASKS_CAPTURE[M_TIMER_INDEX_ADDR_TIMESTAMP];
-
-            NRF_PPI->CHENSET = (1UL << PPI_INDEX_RADIO_START) |
-                               (1UL << PPI_INDEX_RADIO_DISABLE) |
-                               (1UL << PPI_INDEX_TIMESTAMP);
-
-            mesh_lna_setup_start(rampup_start_time - m_instaburst.event.action_start_time, M_TIMER_INDEX_LNA);
-            mesh_pa_lna_setup_stop();
+            /* Setup timer to start the radio */
+            uint32_t rampup_start_time = m_instaburst.event.packet.start_time - RADIO_RAMPUP_TIME - AUX_PACKET_RX_MARGIN_US;
+            timer_order_ppi(INSTABURST_TIMER_INDEX,
+                            rampup_start_time,
+                            (uint32_t *) &NRF_RADIO->TASKS_RXEN,
+                            TIMER_ATTR_TIMESLOT_LOCAL);
 
             /* Ensure that the timer order above was scheduled in time. If this fails, we were
              * locking IRQs for too long, delaying packet processing. */
-            NRF_MESH_ASSERT(TIMER_OLDER_THAN(ts_timer_now(), rampup_start_time));
+            NRF_MESH_ASSERT(TIMER_OLDER_THAN(timer_now(), rampup_start_time));
+
+            NRF_PPI->CH[PPI_INDEX_SECONDARY_TIMER_START].EEP = (uint32_t) &NRF_RADIO->EVENTS_READY;
+            NRF_PPI->CH[PPI_INDEX_SECONDARY_TIMER_START].TEP = (uint32_t) &INSTABURST_TIMER->TASKS_START;
+
+            NRF_PPI->CH[PPI_INDEX_RADIO_STOP].EEP = (uint32_t) &INSTABURST_TIMER->EVENTS_COMPARE[0];
+            NRF_PPI->CH[PPI_INDEX_RADIO_STOP].TEP = (uint32_t) &NRF_RADIO->TASKS_DISABLE;
+
+            /* Sampling the timer will annul the CC value previously setup to cancel the radio, as
+             * it overwrites the register. By setting a PPI from the ADDRESS event ot the
+             * timer capture, we make the timer overwrite its own CC register when the packet is
+             * successfully received, preventing the timer from firing. */
+            NRF_PPI->CH[PPI_INDEX_SECONDARY_TIMER_SAMPLE].EEP = (uint32_t) &NRF_RADIO->EVENTS_ADDRESS;
+            NRF_PPI->CH[PPI_INDEX_SECONDARY_TIMER_SAMPLE].TEP = (uint32_t) &INSTABURST_TIMER->TASKS_CAPTURE[0];
+
+            NRF_PPI->CHENSET = (1 << PPI_INDEX_SECONDARY_TIMER_START) |
+                               (1 << PPI_INDEX_SECONDARY_TIMER_SAMPLE) |
+                               (1 << PPI_INDEX_RADIO_STOP);
+
+#ifdef DEBUG_PINS_ENABLED
+            NRF_GPIOTE->CONFIG[1] = (GPIOTE_CONFIG_MODE_Task << GPIOTE_CONFIG_MODE_Pos) |
+                                    (GPIOTE_CONFIG_OUTINIT_Low << GPIOTE_CONFIG_OUTINIT_Pos) |
+                                    (GPIOTE_CONFIG_POLARITY_Toggle << GPIOTE_CONFIG_POLARITY_Pos) |
+                                    (DEBUG_PIN_INSTABURST_KILL_TIMER << GPIOTE_CONFIG_PSEL_Pos);
+            NRF_PPI->CH[PPI_INDEX_DEBUG_READY].EEP = (uint32_t) &NRF_RADIO->EVENTS_READY;
+            NRF_PPI->CH[PPI_INDEX_DEBUG_READY].TEP = (uint32_t) &NRF_GPIOTE->TASKS_OUT[1];
+            NRF_PPI->CH[PPI_INDEX_DEBUG_TIMEOUT].EEP = (uint32_t) &INSTABURST_TIMER->EVENTS_COMPARE[0];
+            NRF_PPI->CH[PPI_INDEX_DEBUG_TIMEOUT].TEP = (uint32_t) &NRF_GPIOTE->TASKS_OUT[1];
+
+            NRF_PPI->CHENSET = (1 << PPI_INDEX_DEBUG_READY) | (1 << PPI_INDEX_DEBUG_TIMEOUT);
+#endif
         }
     }
     else
     {
-#if INSTABURST_RX_DEBUG
-        if (!in_same_timeslot)
-        {
-            m_instaburst.stats[m_instaburst.event.packet.channel].switched_timeslot++;
-        }
-#endif
         m_instaburst.state = INSTABURST_RX_STATE_IDLE;
         DEBUG_PIN_INSTABURST_OFF(DEBUG_PIN_INSTABURST_IN_ACTION);
         bearer_handler_action_end();
@@ -425,18 +447,24 @@ static void radio_irq_handler(void * p_args)
     DEBUG_PIN_INSTABURST_OFF(DEBUG_PIN_INSTABURST_RADIO_EVT);
     m_instaburst.state = INSTABURST_RX_STATE_IDLE;
     m_instaburst.p_rx_buf = NULL;
+    INSTABURST_TIMER->TASKS_STOP = 1;
 
-    NRF_PPI->CHENCLR = (1UL << PPI_INDEX_RADIO_START) |
-                       (1UL << PPI_INDEX_RADIO_DISABLE) |
-                       (1UL << PPI_INDEX_TIMESTAMP);
-
-    mesh_pa_lna_cleanup();
+    NRF_PPI->CHENCLR = (1 << PPI_INDEX_SECONDARY_TIMER_START) |
+                       (1 << PPI_INDEX_SECONDARY_TIMER_SAMPLE) |
+                       (1 << PPI_INDEX_RADIO_STOP);
+#ifdef DEBUG_PINS_ENABLED
+    NRF_PPI->CHENCLR = (1 << PPI_INDEX_DEBUG_READY) | (1 << PPI_INDEX_DEBUG_TIMEOUT);
+#endif
 
     bearer_handler_action_end();
 
     if (has_more)
     {
-        ts_timestamp_t addr_rx_timestamp = m_instaburst.event.action_start_time + BEARER_ACTION_TIMER->CC[M_TIMER_INDEX_ADDR_TIMESTAMP];
+        /* The session start time marks the timestamp for when we expected the packet to come in. We
+         * added some margin to this. INSTABURST_TIMER's CC[0] holds the time from when we started
+         * RX until the address event was received. */
+        uint32_t addr_rx_timestamp =
+            m_instaburst.event.packet.start_time - AUX_PACKET_RX_MARGIN_US + INSTABURST_TIMER->CC[0];
 
         aux_ptr_handle(&aux_ptr, addr_rx_timestamp, m_instaburst.event.packet.radio_mode);
     }

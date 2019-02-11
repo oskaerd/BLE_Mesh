@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -252,7 +252,7 @@ static void handle_cmd_addr_get(const serial_packet_t * p_cmd)
     {
         rsp.address_handle = p_cmd->payload.cmd.mesh.addr_get.address_handle;
         rsp.addr_type = addr.type;
-        rsp.subscribed = dsm_address_is_rx(&addr);
+        rsp.subscribed = dsm_address_subscription_get(p_cmd->payload.cmd.mesh.addr_get.address_handle);
         rsp.raw_short_addr = addr.value;
 
         if (addr.p_virtual_uuid)
@@ -278,16 +278,10 @@ static void handle_cmd_addr_get_all(const serial_packet_t * p_cmd)
     uint32_t count = sizeof(rsp.address_handles) / sizeof(rsp.address_handles[0]);
     /* May safely cast away the packed attribute, as the rsp is word-aligned on stack: */
     uint32_t status = dsm_address_get_all((dsm_handle_t *) rsp.address_handles, &count);
-    if (count > 0)
-    {
-        serial_handler_common_cmd_rsp_nodata_on_error(
-            p_cmd->opcode, status, (uint8_t *) rsp.address_handles, sizeof(rsp.address_handles[0]) * count);
-    }
-    else
-    {
-        serial_handler_common_cmd_rsp_nodata_on_error(
-            p_cmd->opcode, status, NULL, 0);
-    }
+    serial_handler_common_cmd_rsp_nodata_on_error(p_cmd->opcode,
+            status,
+            (uint8_t *) rsp.address_handles,
+            sizeof(rsp.address_handles[0]) * count);
 }
 
 static void handle_cmd_addr_nonvirtual_count_max_get(const serial_packet_t * p_cmd)
@@ -359,11 +353,6 @@ static void handle_cmd_addr_publication_remove(const serial_packet_t * p_cmd)
 static void handle_cmd_packet_send(const serial_packet_t * p_cmd)
 {
     nrf_mesh_tx_params_t tx_params;
-    memset(&tx_params, 0, sizeof(tx_params));
-
-    serial_evt_cmd_rsp_data_packet_send_t rsp;
-    rsp.token = nrf_mesh_unique_token_get();
-
     uint32_t status = dsm_address_get(p_cmd->payload.cmd.mesh.packet_send.dst_addr_handle, &tx_params.dst);
     if (status == NRF_SUCCESS)
     {
@@ -377,31 +366,12 @@ static void handle_cmd_packet_send(const serial_packet_t * p_cmd)
         }
         else
         {
-#if MESH_FEATURE_LPN_ENABLED
-            status = NRF_ERROR_NOT_FOUND;
-            if (p_cmd->payload.cmd.mesh.packet_send.friendship_credential_flag)
-            {
-                status = dsm_tx_friendship_secmat_get(DSM_HANDLE_INVALID, p_cmd->payload.cmd.mesh.packet_send.appkey_handle,
-                                                      &tx_params.security_material);
-            }
-
-            /* The Mesh Profile Specification v1.0, Section 4.2.2.4:
-             *
-             * When Publish Friendship Credential Flag is set to 1 and the friendship security material is
-             * not available, the master security material shall be used. */
-            if (NRF_ERROR_NOT_FOUND == status)
-#endif
-            {
-                status = dsm_tx_secmat_get(DSM_HANDLE_INVALID,
-                                           p_cmd->payload.cmd.mesh.packet_send.appkey_handle,
-                                           &tx_params.security_material);
-            }
+            status = dsm_tx_secmat_get(p_cmd->payload.cmd.mesh.packet_send.appkey_handle, &tx_params.security_material);
             if (status == NRF_SUCCESS)
             {
                 tx_params.src       = p_cmd->payload.cmd.mesh.packet_send.src_addr;
                 tx_params.ttl       = p_cmd->payload.cmd.mesh.packet_send.ttl;
-                tx_params.force_segmented  = p_cmd->payload.cmd.mesh.packet_send.force_segmented;
-                tx_params.transmic_size = (nrf_mesh_transmic_size_t) p_cmd->payload.cmd.mesh.packet_send.transmic_size;
+                tx_params.reliable  = p_cmd->payload.cmd.mesh.packet_send.reliable;
                 if (p_cmd->length > NRF_MESH_SERIAL_PACKET_OVERHEAD + SERIAL_CMD_MESH_PACKET_SEND_OVERHEAD)
                 {
                     tx_params.p_data    = p_cmd->payload.cmd.mesh.packet_send.data;
@@ -412,13 +382,11 @@ static void handle_cmd_packet_send(const serial_packet_t * p_cmd)
                     tx_params.p_data = NULL;
                     tx_params.data_len = 0;
                 }
-                tx_params.tx_token = rsp.token;
-
                 status = nrf_mesh_packet_send(&tx_params, NULL);
             }
         }
     }
-    serial_handler_common_cmd_rsp_nodata_on_error(p_cmd->opcode, status, (uint8_t *) &rsp, sizeof(rsp));
+    serial_handler_common_cmd_rsp_nodata_on_error(p_cmd->opcode, status, NULL, 0);
 }
 
 static void handle_cmd_clear(const serial_packet_t * p_cmd)
@@ -471,7 +439,6 @@ static const mesh_serial_cmd_handler_t m_handlers[] =
 static void serial_handler_mesh_evt_handle(const nrf_mesh_evt_t* p_evt)
 {
     static serial_packet_t * p_serial_evt;
-    uint32_t status;
     switch (p_evt->type)
     {
         case NRF_MESH_EVT_MESSAGE_RECEIVED:
@@ -482,12 +449,7 @@ static void serial_handler_mesh_evt_handle(const nrf_mesh_evt_t* p_evt)
             {
                 data_length = SERIAL_EVT_MESH_MESSAGE_RECEIVED_DATA_MAXLEN;
             }
-            status = serial_packet_buffer_get(data_length + SERIAL_EVT_MESH_MESSAGE_RECEIVED_LEN_OVERHEAD, &p_serial_evt);
-            if (status != NRF_SUCCESS)
-            {
-                break;
-            }
-
+            NRF_MESH_ASSERT(NRF_SUCCESS == serial_packet_buffer_get(data_length + SERIAL_EVT_MESH_MESSAGE_RECEIVED_LEN_OVERHEAD, &p_serial_evt));
             serial_evt_mesh_message_received_t * p_msg_rcvd = &p_serial_evt->payload.evt.mesh.message_received;
             p_msg_rcvd->actual_length = p_evt->params.message.length;
             if (p_evt->params.message.dst.type == NRF_MESH_ADDRESS_TYPE_UNICAST)
@@ -519,33 +481,18 @@ static void serial_handler_mesh_evt_handle(const nrf_mesh_evt_t* p_evt)
             break;
         }
         case NRF_MESH_EVT_IV_UPDATE_NOTIFICATION:
-            status = serial_packet_buffer_get(SERIAL_PACKET_LENGTH_OVERHEAD + sizeof(serial_evt_mesh_iv_update_t), &p_serial_evt);
-            if (status == NRF_SUCCESS)
-            {
-                p_serial_evt->opcode = SERIAL_OPCODE_EVT_MESH_IV_UPDATE_NOTIFICATION;
-                p_serial_evt->payload.evt.mesh.iv_update.iv_index = p_evt->params.iv_update.iv_index;
-                serial_tx(p_serial_evt);
-            }
+            NRF_MESH_ASSERT(NRF_SUCCESS == serial_packet_buffer_get(SERIAL_PACKET_LENGTH_OVERHEAD + sizeof(serial_evt_mesh_iv_update_t), &p_serial_evt));
+            p_serial_evt->opcode = SERIAL_OPCODE_EVT_MESH_IV_UPDATE_NOTIFICATION;
+            p_serial_evt->payload.evt.mesh.iv_update.iv_index = p_evt->params.iv_update.iv_index;
+            serial_tx(p_serial_evt);
             break;
 
         case NRF_MESH_EVT_KEY_REFRESH_NOTIFICATION:
-            status = serial_packet_buffer_get(SERIAL_PACKET_LENGTH_OVERHEAD + sizeof(serial_evt_mesh_key_refresh_t), &p_serial_evt);
-            if (status == NRF_SUCCESS)
-            {
-                p_serial_evt->opcode = SERIAL_OPCODE_EVT_MESH_KEY_REFRESH_NOTIFICATION;
-                p_serial_evt->payload.evt.mesh.key_refresh.netkey_index = p_evt->params.key_refresh.subnet_index;
-                p_serial_evt->payload.evt.mesh.key_refresh.phase = p_evt->params.key_refresh.phase;
-                serial_tx(p_serial_evt);
-            }
-            break;
-        case NRF_MESH_EVT_TX_COMPLETE:
-            status = serial_packet_buffer_get(SERIAL_PACKET_LENGTH_OVERHEAD + sizeof(serial_evt_mesh_tx_complete_t), &p_serial_evt);
-            if (status == NRF_SUCCESS)
-            {
-                p_serial_evt->opcode = SERIAL_OPCODE_EVT_MESH_TX_COMPLETE;
-                p_serial_evt->payload.evt.mesh.tx_complete.token = p_evt->params.tx_complete.token;
-                serial_tx(p_serial_evt);
-            }
+            NRF_MESH_ASSERT(NRF_SUCCESS == serial_packet_buffer_get(SERIAL_PACKET_LENGTH_OVERHEAD + sizeof(serial_evt_mesh_key_refresh_t), &p_serial_evt));
+            p_serial_evt->opcode = SERIAL_OPCODE_EVT_MESH_KEY_REFRESH_NOTIFICATION;
+            p_serial_evt->payload.evt.mesh.key_refresh.netkey_index = p_evt->params.key_refresh.subnet_index;
+            p_serial_evt->payload.evt.mesh.key_refresh.phase = p_evt->params.key_refresh.phase;
+            serial_tx(p_serial_evt);
             break;
 
         default:

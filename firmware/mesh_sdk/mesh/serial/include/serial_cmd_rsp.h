@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -49,7 +49,7 @@
 
 
 /**
- * @defgroup SERIAL_CMD_RSP Serial Command Response definitions
+ * @defgroup SERIAL_CMD_RSP Serial Command Response defintions
  * @ingroup MESH_SERIAL
  * @{
  */
@@ -62,12 +62,6 @@
 #define SERIAL_EVT_CMD_RSP_DATA_MAXLEN      (NRF_MESH_SERIAL_PAYLOAD_MAXLEN  - SERIAL_EVT_CMD_RSP_OVERHEAD)
 
 /*lint -align_max(push) -align_max(1) */
-
-/** Serial interface housekeeping data. */
-typedef struct __attribute((packed))
-{
-    uint32_t alloc_fail_count;  /**< Number of failed serial packet allocations. */
-} serial_evt_cmd_rsp_data_housekeeping_t;
 
 /** Subnetwork access response data */
 typedef struct __attribute((packed))
@@ -207,13 +201,13 @@ typedef struct __attribute((packed))
 /** Command response data with address handle for the publish address. */
 typedef struct __attribute((packed))
 {
-    dsm_handle_t addr_handle;      /**< Address handle for the publish address. */
+    dsm_handle_t addr_handle;
 } serial_evt_cmd_rsp_data_model_pub_addr_get_t;
 
 /** Command response data with appkey handle of the application key used for publishing. */
 typedef struct __attribute((packed))
 {
-    dsm_handle_t appkey_handle;    /**< Handle of the application key used for publishing. */
+    dsm_handle_t appkey_handle;
 } serial_evt_cmd_rsp_data_model_pub_app_get_t;
 
 /** Command response data with publish period information. */
@@ -240,31 +234,31 @@ typedef struct __attribute((packed))
 /** Command response data with the publish ttl value. */
 typedef struct __attribute((packed))
 {
-    uint8_t ttl;                /**< TTL for published messages. */
+    uint8_t ttl;
 } serial_evt_cmd_rsp_data_model_pub_ttl_get_t;
 
 /** Command response data with the element location info. */
 typedef struct __attribute((packed))
 {
-    uint16_t location;          /**< Element location info. */
+    uint16_t location;
 } serial_evt_cmd_rsp_data_elem_loc_get_t;
 
 /** Command response data with the model count. */
 typedef struct __attribute((packed))
 {
-    uint8_t model_count;        /**< Number of existing models. */
+    uint8_t model_count;
 } serial_evt_cmd_rsp_data_elem_model_count_get_t;
 
 /** Command response data with the model id. */
 typedef struct __attribute((packed))
 {
-    access_model_id_t model_id; /**< Company and model IDs. */
+    access_model_id_t model_id;
 } serial_evt_cmd_rsp_data_model_id_get_t;
 
 /** Command response data with the model handle. */
 typedef struct __attribute((packed))
 {
-    access_model_handle_t model_handle;  /**< Handle of the requested model. */
+    access_model_handle_t model_handle;
 } serial_evt_cmd_rsp_data_model_handle_get_t;
 
 /** Command response to @ref SERIAL_OPCODE_CMD_ACCESS_MODEL_APP_GET with application key handles. */
@@ -284,21 +278,15 @@ typedef struct __attribute((packed))
 /** Command response to @ref SERIAL_OPCODE_CMD_MODEL_SPECIFIC_INIT with the reserved model handle. */
 typedef struct __attribute((packed))
 {
-    access_model_handle_t model_handle;  /**< Handle of the initialized model. */
+    access_model_handle_t model_handle;
 } serial_evt_cmd_rsp_data_model_init_t;
 
 /** Command response to @ref SERIAL_OPCODE_CMD_MODEL_SPECIFIC_COMMAND from the model addressed. */
 typedef struct __attribute((packed))
 {
-    uint8_t data_len;                                               /**< Length of data array. Set to 0 to indicate no data to send */
-    uint8_t data[SERIAL_EVT_CMD_RSP_DATA_MAXLEN - sizeof(uint8_t)]; /**< Command response data specific to each model. */
+    uint8_t data_len; /* Length of data array, set to 0 to indicate no data to send */
+    uint8_t data[SERIAL_EVT_CMD_RSP_DATA_MAXLEN - sizeof(uint8_t)]; /* Command response data specific to each model. */
 } serial_evt_cmd_rsp_data_model_cmd_t;
-
-/** Command response to @ref SERIAL_OPCODE_CMD_MESH_PACKET_SEND with information about the sent packet. */
-typedef struct __attribute((packed))
-{
-    nrf_mesh_tx_token_t token; /**< TX Token assigned to the packet. Can be used to resolve which packet a @ref SERIAL_OPCODE_EVT_MESH_TX_COMPLETE event refers to. */
-} serial_evt_cmd_rsp_data_packet_send_t;
 
 /** Command response packet. */
 typedef struct __attribute((packed))
@@ -307,7 +295,6 @@ typedef struct __attribute((packed))
     uint8_t status; /**< Return status of the serial command. */
     union __attribute((packed))
     {
-        serial_evt_cmd_rsp_data_housekeeping_t         hk_data;        /**< Housekeeping data response. */
         serial_evt_cmd_rsp_data_subnet_t               subnet;         /**< Subnet response. */
         serial_evt_cmd_rsp_data_subnet_list_t          subnet_list;    /**< List of all subnet key indexes. */
         serial_evt_cmd_rsp_data_appkey_t               appkey;         /**< Appkey response. */
@@ -332,12 +319,11 @@ typedef struct __attribute((packed))
         serial_evt_cmd_rsp_data_model_pub_ttl_get_t    pub_ttl;        /**< Model publish ttl value. */
         serial_evt_cmd_rsp_data_elem_loc_get_t         elem_loc;       /**< Element location. */
         serial_evt_cmd_rsp_data_elem_model_count_get_t model_count;    /**< Number of models in the element. */
-        serial_evt_cmd_rsp_data_model_id_get_t         model_id;       /**< Company and model IDs. */
+        serial_evt_cmd_rsp_data_model_id_get_t         model_id;
         serial_evt_cmd_rsp_data_model_handle_get_t     model_handle;   /**< Handle for the model */
         serial_evt_cmd_rsp_data_elem_models_get_t      model_handles;  /**< Element's list of model handles. */
         serial_evt_cmd_rsp_data_models_get_t           model_ids;      /**< All the available models.*/
-        serial_evt_cmd_rsp_data_model_init_t           model_init;     /**< Reserved handle for the initialized model instance. */
-        serial_evt_cmd_rsp_data_packet_send_t          packet_send;    /**< Information about the sent packet. */
+        serial_evt_cmd_rsp_data_model_init_t           model_init;   /**< Reserved handle for the initialized model instance. */
 
     } data; /**< Optional command response data. */
 } serial_evt_cmd_rsp_t;

@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -41,9 +41,7 @@
 
 #include "access.h"
 #include "access_internal.h"
-#include "access_loopback.h"
 #include "access_config.h"
-#include "access_publish_retransmission.h"
 
 #include "access_publish.h"
 #include "access_reliable.h"
@@ -54,7 +52,6 @@
 #include "nrf_mesh_utils.h"
 #include "nrf_mesh.h"
 
-#include "mesh_mem.h"
 #include "device_state_manager.h"
 #include "log.h"
 #include "bitfield.h"
@@ -82,9 +79,6 @@ static nrf_mesh_evt_handler_t m_evt_handler;
 
 /** Default TTL value for the node. */
 static uint8_t m_default_ttl = ACCESS_DEFAULT_TTL;
-
-/* Flag indicating if access flash operations are complete */
-static bool m_access_flash_stable = true;
 
 /* ********** Static asserts ********** */
 
@@ -156,7 +150,7 @@ static access_opcode_t opcode_get(const uint8_t * p_buffer)
             break;
         case ACCESS_PACKET_OPCODE_FORMAT_3BYTE:
             opcode.opcode = p_buffer[0];
-            opcode.company_id = (p_buffer[1]) | ((uint16_t) p_buffer[2] << 8);
+            opcode.company_id = ((uint16_t) p_buffer[1] << 8) | (p_buffer[2]);
             break;
     }
     return opcode;
@@ -167,8 +161,8 @@ static void opcode_set(access_opcode_t opcode, uint8_t * p_buffer)
     if (opcode.company_id != ACCESS_COMPANY_ID_NONE)
     {
         p_buffer[0] = opcode.opcode & 0x00FF;
-        p_buffer[1] = opcode.company_id & 0x00FF;
-        p_buffer[2] = (opcode.company_id >> 8) & 0x00FF;
+        p_buffer[1] = (opcode.company_id >> 8) & 0x00FF;
+        p_buffer[2] = opcode.company_id & 0x00FF;
     }
     else if ((opcode.opcode & 0xFF00) > 0)
     {
@@ -235,6 +229,57 @@ static inline bool model_handle_valid_and_allocated(access_model_handle_t handle
     return (handle < ACCESS_MODEL_COUNT && ACCESS_INTERNAL_STATE_IS_ALLOCATED(m_model_pool[handle].internal_state));
 }
 
+static void handle_incoming(const access_message_rx_t * p_message)
+{
+    const nrf_mesh_address_t * p_dst = &p_message->meta_data.dst;
+
+    if (p_dst->type == NRF_MESH_ADDRESS_TYPE_UNICAST)
+    {
+        dsm_local_unicast_address_t local_addresses;
+        dsm_local_unicast_addresses_get(&local_addresses);
+
+        if (p_dst->value >= local_addresses.address_start &&
+            p_dst->value <  (local_addresses.address_start + local_addresses.count))
+        {
+            uint16_t element_index = p_dst->value - local_addresses.address_start;
+            for (int i = 0; i < ACCESS_MODEL_COUNT; ++i)
+            {
+                access_common_t * p_model = &m_model_pool[i];
+                uint32_t opcode_index;
+                if (ACCESS_INTERNAL_STATE_IS_ALLOCATED(p_model->internal_state) &&
+                    p_model->model_info.element_index == element_index &&
+                    bitfield_get(p_model->model_info.application_keys_bitfield, p_message->meta_data.appkey_handle) &&
+                    is_opcode_of_model(p_model, p_message->opcode, &opcode_index))
+                {
+                    access_reliable_message_rx_cb(i, p_message, p_model->p_args);
+                    p_model->p_opcode_handlers[opcode_index].handler(i, p_message, p_model->p_args);
+                }
+            }
+        }
+    }
+    else
+    {
+        dsm_handle_t address_handle = DSM_HANDLE_INVALID;
+        /* If it's not one of the element addresses, it has to be a subscription address. */
+        NRF_MESH_ERROR_CHECK(dsm_address_handle_get(p_dst, &address_handle));
+        NRF_MESH_ASSERT(dsm_address_subscription_get(address_handle));
+        for (int i = 0; i < ACCESS_MODEL_COUNT; ++i)
+        {
+            access_common_t * p_model = &m_model_pool[i];
+            uint32_t opcode_index;
+
+            if (ACCESS_INTERNAL_STATE_IS_ALLOCATED(p_model->internal_state) &&
+                ACCESS_SUBSCRIPTION_LIST_COUNT > p_model->model_info.subscription_pool_index  &&
+                bitfield_get(p_model->model_info.application_keys_bitfield, p_message->meta_data.appkey_handle) &&
+                bitfield_get(m_subscription_list_pool[p_model->model_info.subscription_pool_index].bitfield, address_handle) &&
+                is_opcode_of_model(p_model, p_message->opcode, &opcode_index))
+            {
+                p_model->p_opcode_handlers[opcode_index].handler(i, p_message, p_model->p_args);
+            }
+        }
+    }
+}
+
 static void mesh_msg_handle(const nrf_mesh_evt_message_t * p_evt)
 {
     NRF_MESH_ASSERT(p_evt != NULL);
@@ -247,26 +292,25 @@ static void mesh_msg_handle(const nrf_mesh_evt_message_t * p_evt)
 
     /*lint -save -e64 -e446 Side effects and type mismatches in initializer */
     dsm_handle_t appkey_handle = dsm_appkey_handle_get(p_evt->secmat.p_app);
-    dsm_handle_t subnet_handle = dsm_subnet_handle_get(p_evt->secmat.p_net);
     access_message_rx_t message =
-    {
-        .opcode = opcode,
-        .p_data = &p_evt->p_buffer[access_utils_opcode_size_get(opcode)],
-        .length = p_evt->length - access_utils_opcode_size_get(opcode),
-        .meta_data.src.type = p_evt->src.type,
-        .meta_data.src.value = p_evt->src.value,
-        .meta_data.src.p_virtual_uuid = p_evt->src.p_virtual_uuid,
-        .meta_data.dst.type = p_evt->dst.type,
-        .meta_data.dst.value = p_evt->dst.value,
-        .meta_data.dst.p_virtual_uuid = p_evt->dst.p_virtual_uuid,
-        .meta_data.ttl = p_evt->ttl,
-        .meta_data.appkey_handle = appkey_handle,
-        .meta_data.p_core_metadata = p_evt->p_metadata,
-        .meta_data.subnet_handle = subnet_handle,
-    };
+        {
+            .opcode = opcode,
+            .p_data = &p_evt->p_buffer[access_utils_opcode_size_get(opcode)],
+            .length = p_evt->length - access_utils_opcode_size_get(opcode),
+            .meta_data.src.type = p_evt->src.type,
+            .meta_data.src.value = p_evt->src.value,
+            .meta_data.src.p_virtual_uuid = p_evt->src.p_virtual_uuid,
+            .meta_data.dst.type = p_evt->dst.type,
+            .meta_data.dst.value = p_evt->dst.value,
+            .meta_data.dst.p_virtual_uuid = p_evt->dst.p_virtual_uuid,
+            .meta_data.timestamp = p_evt->p_metadata->params.scanner.timestamp,
+            .meta_data.rssi = p_evt->p_metadata->params.scanner.rssi,
+            .meta_data.ttl = p_evt->ttl,
+            .meta_data.appkey_handle = appkey_handle
+        };
     /*lint -restore */
 
-    access_incoming_handle(&message);
+    handle_incoming(&message);
 }
 
 static void mesh_evt_cb(const nrf_mesh_evt_t * p_evt)
@@ -286,9 +330,6 @@ static void mesh_evt_cb(const nrf_mesh_evt_t * p_evt)
 static bool check_tx_params(access_model_handle_t handle, const access_message_tx_t * p_tx_message, const access_message_rx_t * p_rx_message, uint32_t * p_status)
 {
     NRF_MESH_ASSERT(NULL != p_status);
-
-    /* Various checks being done here to ensure that model does not publish a message if
-       publication is disabled by setting - Unassigned publish address, or deleted app key */
     if (p_tx_message->length >= ACCESS_MESSAGE_LENGTH_MAX)
     {
         *p_status = NRF_ERROR_INVALID_LENGTH;
@@ -299,9 +340,9 @@ static bool check_tx_params(access_model_handle_t handle, const access_message_t
         *p_status = NRF_ERROR_NOT_FOUND;
     }
     else if ((p_rx_message == NULL &&
-             (m_model_pool[handle].model_info.publish_appkey_handle  == DSM_HANDLE_INVALID ||
-              m_model_pool[handle].model_info.publish_address_handle == DSM_HANDLE_INVALID)) ||
-              !is_valid_opcode(p_tx_message->opcode))
+              (m_model_pool[handle].model_info.publish_appkey_handle  == DSM_HANDLE_INVALID ||
+               m_model_pool[handle].model_info.publish_address_handle == DSM_HANDLE_INVALID)) ||
+             !is_valid_opcode(p_tx_message->opcode))
     {
         *p_status = NRF_ERROR_INVALID_PARAM;
     }
@@ -315,15 +356,17 @@ static bool check_tx_params(access_model_handle_t handle, const access_message_t
 
 static uint32_t packet_tx(access_model_handle_t handle,
                           const access_message_tx_t * p_tx_message,
-                          const access_message_rx_t * p_rx_message,
-                          const uint8_t *p_access_payload,
-                          uint16_t access_payload_len)
+                          const access_message_rx_t * p_rx_message)
 {
-    uint32_t status = NRF_SUCCESS;
+    uint32_t status;
+    if (!check_tx_params(handle, p_tx_message, p_rx_message, &status))
+    {
+        return status;
+    }
 
     dsm_local_unicast_address_t local_addresses;
     dsm_local_unicast_addresses_get(&local_addresses);
-    if (m_model_pool[handle].model_info.element_index >= local_addresses.count)
+    if (local_addresses.count <= m_model_pool[handle].model_info.element_index)
     {
         return NRF_ERROR_INVALID_ADDR;
     }
@@ -331,25 +374,21 @@ static uint32_t packet_tx(access_model_handle_t handle,
     uint16_t src_address = local_addresses.address_start + m_model_pool[handle].model_info.element_index;
 
     nrf_mesh_address_t dst_address;
-    dsm_handle_t appkey_handle;
-    dsm_handle_t subnet_handle = DSM_HANDLE_INVALID;
+    dsm_handle_t appkey_handle, publish_handle;
     if (p_rx_message != NULL)
     {
         appkey_handle = p_rx_message->meta_data.appkey_handle;
-        subnet_handle = p_rx_message->meta_data.subnet_handle;
         dst_address = p_rx_message->meta_data.src;
+        if (dsm_address_handle_get(&p_rx_message->meta_data.src, &publish_handle) != NRF_SUCCESS)
+        {
+            publish_handle = DSM_HANDLE_INVALID;
+        }
     }
     else
     {
         appkey_handle = m_model_pool[handle].model_info.publish_appkey_handle;
-        if (dsm_address_get(m_model_pool[handle].model_info.publish_address_handle, &dst_address) != NRF_SUCCESS)
-        {
-            return NRF_ERROR_NOT_FOUND;
-        }
-        if  (dst_address.value == NRF_MESH_ADDR_UNASSIGNED)
-        {
-            return NRF_ERROR_INVALID_ADDR;
-        }
+        publish_handle = m_model_pool[handle].model_info.publish_address_handle;
+        NRF_MESH_ERROR_CHECK(dsm_address_get(m_model_pool[handle].model_info.publish_address_handle, &dst_address));
     }
 
     uint8_t ttl;
@@ -362,113 +401,61 @@ static uint32_t packet_tx(access_model_handle_t handle,
         ttl = m_model_pool[handle].model_info.publish_ttl;
     }
 
-    bool loopback_packet = is_access_loopback(&dst_address);
+    /* Check if we are sending a message to one of our own addresses: */
+    bool loopback_packet = (dst_address.type == NRF_MESH_ADDRESS_TYPE_UNICAST
+            && dst_address.value >= local_addresses.address_start
+            && dst_address.value < local_addresses.address_start + local_addresses.count)
+        || (dst_address.type != NRF_MESH_ADDRESS_TYPE_UNICAST
+                && publish_handle != DSM_HANDLE_INVALID
+                && dsm_address_subscription_get(publish_handle));
+
     if (loopback_packet)
     {
-        access_loopback_request_t request =
+        const access_message_rx_t rx_message =
         {
-            .token = p_tx_message->access_token,
-            .opcode = p_tx_message->opcode, /*lint !e64 Type mismatch */
+            .opcode = p_tx_message->opcode,  /*lint !e64 Type mismatch */
             .p_data = p_tx_message->p_buffer,
             .length = p_tx_message->length,
-            .src_value = src_address,
-            .dst = dst_address,              /*lint !e64 Type mismatch */
-            .ttl = ttl,
-            .appkey_handle = appkey_handle,
-            .subnet_handle = subnet_handle
+            .meta_data =
+            {
+                .src = { NRF_MESH_ADDRESS_TYPE_UNICAST, src_address },
+                .dst = dst_address, /*lint !e64 Type mismatch */
+                .timestamp = timer_now(), /*lint !e446 Initializer with side effect */
+                .ttl = ttl,
+                .appkey_handle = appkey_handle
+            }
         };
 
-        status = access_loopback_handle(&request);
+        handle_incoming(&rx_message);
+        status = NRF_SUCCESS;
     }
 
     if (!loopback_packet || (dst_address.type != NRF_MESH_ADDRESS_TYPE_UNICAST))
     {
-        NRF_MESH_ASSERT_DEBUG(p_access_payload != NULL);
-        NRF_MESH_ASSERT_DEBUG(access_payload_len != 0);
-
         nrf_mesh_tx_params_t tx_params;
         memset(&tx_params, 0, sizeof(tx_params));
+        uint8_t p_data[p_tx_message->length + access_utils_opcode_size_get(p_tx_message->opcode)];
 
-#if MESH_FEATURE_LPN_ENABLED
-        status = NRF_ERROR_NOT_FOUND;
-        if (m_model_pool[handle].model_info.friendship_credential_flag)
-        {
-            status = dsm_tx_friendship_secmat_get(subnet_handle, appkey_handle, &tx_params.security_material);
-        }
-
-        /* The Mesh Profile Specification v1.0, Section 4.2.2.4:
-         *
-         * When Publish Friendship Credential Flag is set to 1 and the friendship security material is
-         * not available, the master security material shall be used. */
-        if (NRF_ERROR_NOT_FOUND == status)
-#endif
-        {
-            status = dsm_tx_secmat_get(subnet_handle, appkey_handle, &tx_params.security_material);
-        }
-
-        if (status != NRF_SUCCESS)
-        {
-            return status;
-        }
+        NRF_MESH_ERROR_CHECK(dsm_tx_secmat_get(appkey_handle, &tx_params.security_material));
 
         tx_params.dst = dst_address;
         tx_params.src = src_address;
         tx_params.ttl = ttl;
-        tx_params.force_segmented = p_tx_message->force_segmented;
-        tx_params.transmic_size = p_tx_message->transmic_size;
-        tx_params.p_data = p_access_payload;
-        tx_params.data_len = access_payload_len;
+        tx_params.p_data = p_data;
+        tx_params.data_len = p_tx_message->length + access_utils_opcode_size_get(p_tx_message->opcode);
         tx_params.tx_token = p_tx_message->access_token;
+
+        opcode_set(p_tx_message->opcode, p_data);
+        memcpy(&p_data[access_utils_opcode_size_get(p_tx_message->opcode)], p_tx_message->p_buffer, p_tx_message->length);
 
         status = nrf_mesh_packet_send(&tx_params, NULL);
         if (status == NRF_SUCCESS)
         {
-            __LOG(LOG_SRC_ACCESS, LOG_LEVEL_DBG1, "TX: [aop: 0x%04x] \n", p_tx_message->opcode.opcode);
-            __LOG_XB(LOG_SRC_ACCESS, LOG_LEVEL_DBG1, "TX: Msg", p_tx_message->p_buffer, p_tx_message->length);
+            __LOG(LOG_SRC_ACCESS, LOG_LEVEL_DBG1, "TX: [aop: 0x%04x]\n", p_tx_message->opcode.opcode);
         }
     }
 
     return status;
-}
-
-static uint32_t packet_alloc_and_tx(access_model_handle_t handle,
-                                    const access_message_tx_t * p_tx_message,
-                                    const access_message_rx_t * p_rx_message,
-                                    uint8_t **pp_access_payload,
-                                    uint16_t *p_access_payload_len)
-{
-    NRF_MESH_ASSERT_DEBUG(p_tx_message != NULL);
-
-    uint32_t status;
-
-    if (!check_tx_params(handle, p_tx_message, p_rx_message, &status))
-    {
-        return status;
-    }
-
-    uint16_t opcode_length = access_utils_opcode_size_get(p_tx_message->opcode);
-    uint16_t payload_length = opcode_length + p_tx_message->length;
-
-    uint8_t *p_payload = (uint8_t *) mesh_mem_alloc(payload_length);
-    if (NULL == p_payload)
-    {
-        return NRF_ERROR_NO_MEM;
-    }
-
-    opcode_set(p_tx_message->opcode, p_payload);
-    memcpy(&p_payload[opcode_length], p_tx_message->p_buffer, p_tx_message->length);
-
-    status = packet_tx(handle, p_tx_message, p_rx_message, p_payload, payload_length);
-    if (NRF_SUCCESS != status || NULL == pp_access_payload || NULL == p_access_payload_len)
-    {
-        mesh_mem_free(p_payload);
-        return status;
-    }
-
-    *pp_access_payload = p_payload;
-    *p_access_payload_len = payload_length;
-
-    return NRF_SUCCESS;
 }
 
 static void access_state_clear(void)
@@ -476,68 +463,13 @@ static void access_state_clear(void)
     memset(&m_model_pool[0], 0, sizeof(m_model_pool));
     memset(&m_element_pool[0], 0, sizeof(m_element_pool));
     memset(&m_subscription_list_pool[0], 0, sizeof(m_subscription_list_pool));
-    for (uint16_t i = 0; i < ARRAY_SIZE(m_model_pool); ++i)
+    for (uint16_t i = 0; i < sizeof(m_model_pool)/sizeof(m_model_pool[0]); ++i)
     {
         m_model_pool[i].model_info.publish_address_handle = DSM_HANDLE_INVALID;
         m_model_pool[i].model_info.publish_appkey_handle = DSM_HANDLE_INVALID;
         m_model_pool[i].model_info.subscription_pool_index = ACCESS_SUBSCRIPTION_LIST_COUNT;
         m_model_pool[i].model_info.element_index = ACCESS_ELEMENT_INDEX_INVALID;
     }
-}
-
-static bool model_subscribes_to_addr(const access_common_t * p_model, dsm_handle_t address_handle)
-{
-    return (p_model->model_info.subscription_pool_index < ACCESS_SUBSCRIPTION_LIST_COUNT &&
-            bitfield_get(m_subscription_list_pool[p_model->model_info.subscription_pool_index].bitfield,
-                         address_handle));
-}
-
-/**
- * Checks whether a destination address is designated for a specific element.
- *
- * @param[in] p_dst The destination address to check for
- * @param[in,out] p_index Index of the element that should process the message destined for the given address.
- *
- * @returns Whether or not the destination address is designated for a specific element.
- */
-static bool is_element_rx_address(const nrf_mesh_address_t * p_dst, uint16_t * p_index)
-{
-    if (p_dst->type == NRF_MESH_ADDRESS_TYPE_UNICAST)
-    {
-        dsm_local_unicast_address_t local_addresses;
-        dsm_local_unicast_addresses_get(&local_addresses);
-
-        *p_index = p_dst->value - local_addresses.address_start;
-        return true;
-    }
-    else if (p_dst->value == NRF_MESH_ALL_PROXIES_ADDR ||
-             p_dst->value == NRF_MESH_ALL_FRIENDS_ADDR ||
-             p_dst->value == NRF_MESH_ALL_RELAYS_ADDR ||
-             p_dst->value == NRF_MESH_ALL_NODES_ADDR)
-    {
-        /* According to the Mesh Profile Specification v1.0 section 3.4.2, only models on the
-         * primary element of the node shall process the fixed group addresses. */
-        *p_index = 0;
-        return true;
-    }
-    return false;
-}
-
-/* Checks if the model's subscription list is shared. Note: Model handle must be valid */
-static bool model_subscription_list_is_shared(access_model_handle_t handle)
-{
-    NRF_MESH_ASSERT_DEBUG(model_handle_valid_and_allocated(handle));
-    uint16_t sub_pool_index = m_model_pool[handle].model_info.subscription_pool_index;
-
-    for (uint32_t i = 0; i < ACCESS_MODEL_COUNT; ++i)
-    {
-        if (m_model_pool[i].model_info.subscription_pool_index == sub_pool_index && i != handle)
-        {
-            return true;
-        }
-    }
-
-    return false;
 }
 
 #if PERSISTENT_STORAGE
@@ -605,8 +537,6 @@ static void flash_write_complete(const flash_manager_t * p_manager, const fm_ent
         };
         event_handle(&evt);
     }
-
-    m_access_flash_stable = true;
 }
 
 static void flash_invalidate_complete(const flash_manager_t * p_manager, fm_handle_t handle, fm_result_t result)
@@ -640,7 +570,11 @@ static void add_flash_manager(void)
     manager_config.invalidate_complete_cb = flash_invalidate_complete;
     manager_config.remove_complete_cb = flash_remove_complete;
     manager_config.min_available_space = WORD_SIZE;
-    manager_config.p_area = access_flash_area_get();
+#ifdef ACCESS_FLASH_AREA_LOCATION
+    manager_config.p_area = (const flash_manager_page_t *) ACCESS_FLASH_AREA_LOCATION;
+#else
+    manager_config.p_area = (const flash_manager_page_t *) (((const uint8_t *) dsm_flash_area_get()) - (ACCESS_FLASH_PAGE_COUNT * PAGE_SIZE));
+#endif
     manager_config.page_count = ACCESS_FLASH_PAGE_COUNT;
     m_flash_not_ready = true;
     uint32_t status = flash_manager_add(&m_flash_manager, &manager_config);
@@ -653,61 +587,69 @@ static void add_flash_manager(void)
         m_flash_not_ready = false;
     }
 }
-/**
- * Restore flash data with the given filter match.
- *
- * Calls the restore callback for every matching entry. The @p p_args argument in the restore
- * callback points to a @c fail boolean which the restore callback can use to indicate invalid entries.
- *
- * @param[in] filter_match Filter to match entries on, only the bits in @ref FLASH_HANDLE_FILTER_MASK are considered.
- * @param[in] restore_callback Callback to call on every matching entry.
- * @param[out] p_success Will be set @c true if the entries were successfully restored, and @c false
- * if one the entries couldn't be restored.
- *
- * @returns The number of restored entries.
- */
-static uint32_t restore_flash_data(fm_handle_t filter_match, flash_manager_read_cb_t restore_callback, bool * p_success)
+
+typedef bool (*flash_data_handler_t)(const fm_entry_t * p_entry);
+
+static int restore_flash_data(fm_handle_t filter_match, uint16_t element_count, flash_data_handler_t restore_callback)
 {
     fm_handle_filter_t filter = {.mask = FLASH_HANDLE_FILTER_MASK, .match = filter_match};
-    *p_success = true;
-    return flash_manager_entries_read(&m_flash_manager, &filter, restore_callback, p_success);
+    const fm_entry_t * p_entry = NULL;
+    int no_elements = 0;
+
+    do
+    {
+        p_entry = flash_manager_entry_next_get(&m_flash_manager, &filter, p_entry);
+        if (p_entry != NULL)
+        {
+            if (!restore_callback(p_entry))
+            {
+                return -1; /* Early exit, we expect no invalid entries. */
+            }
+            no_elements++;
+        }
+    } while (p_entry != NULL);
+    NRF_MESH_ASSERT(no_elements <= element_count);
+    return no_elements;
 }
 
-static fm_iterate_action_t restore_acquired_subscription(const fm_entry_t * p_entry, void * p_success)
+static bool restore_acquired_subscription(const fm_entry_t * p_entry)
 {
     access_flash_subscription_list_t * p_subs_list_entry = (access_flash_subscription_list_t *) p_entry->data;
     uint16_t index = p_entry->header.handle & FLASH_HANDLE_TO_ACCESS_HANDLE_MASK;
     if (index >= ACCESS_SUBSCRIPTION_LIST_COUNT)
     {
-        *((bool *) p_success) = false;
-        return FM_ITERATE_ACTION_STOP;
+        return false;
     }
-    ACCESS_INTERNAL_STATE_ALLOCATED_SET(m_subscription_list_pool[index].internal_state);
-    for (uint32_t i = 0; i < ARRAY_SIZE(p_subs_list_entry->inverted_bitfield); ++i)
+    else
     {
-        m_subscription_list_pool[index].bitfield[i] = ~p_subs_list_entry->inverted_bitfield[i];
+        ACCESS_INTERNAL_STATE_ALLOCATED_SET(m_subscription_list_pool[index].internal_state);
+        for (uint32_t i = 0; i < sizeof(p_subs_list_entry->inverted_bitfield)/sizeof(p_subs_list_entry->inverted_bitfield[0]); ++i)
+        {
+            m_subscription_list_pool[index].bitfield[i] = ~p_subs_list_entry->inverted_bitfield[i];
+        }
+        return true;
     }
-    return FM_ITERATE_ACTION_CONTINUE;
 }
 
 static inline bool restore_subscription_lists(void)
 {
-    bool success;
-    (void) restore_flash_data(FLASH_GROUP_SUBS_LIST, restore_acquired_subscription, &success);
-    return success;
+    /* If there are no subscription lists in use we might get 0 restored. */
+    return (0 <= restore_flash_data(FLASH_GROUP_SUBS_LIST, ACCESS_SUBSCRIPTION_LIST_COUNT, restore_acquired_subscription));
 }
 
-static fm_iterate_action_t restore_acquired_element(const fm_entry_t * p_entry, void * p_success)
+static bool restore_acquired_element(const fm_entry_t * p_entry)
 {
     uint16_t index = p_entry->header.handle & FLASH_HANDLE_TO_ACCESS_HANDLE_MASK;
     uint16_t * p_element_location = (uint16_t *) p_entry->data;
     if (index >= ACCESS_ELEMENT_COUNT)
     {
-        *((bool *) p_success) = false;
-        return FM_ITERATE_ACTION_STOP;
+        return false;
     }
-    m_element_pool[index].location = *p_element_location;
-    return FM_ITERATE_ACTION_CONTINUE;
+    else
+    {
+        m_element_pool[index].location = *p_element_location;
+        return true;
+    }
 }
 
 static inline bool restore_elements(void)
@@ -719,12 +661,11 @@ static inline bool restore_elements(void)
         m_element_pool[i].location = 0;
         ACCESS_INTERNAL_STATE_OUTDATED_CLR(m_element_pool[i].internal_state);
     }
-    bool success;
-    (void) restore_flash_data(FLASH_GROUP_ELEMENT, restore_acquired_element, &success);
-    return success;
+    /* If there hasn't been any modifications to any element, the restore_.. may return 0. */
+    return (0 <= restore_flash_data(FLASH_GROUP_ELEMENT, ACCESS_ELEMENT_COUNT, restore_acquired_element));
 }
 
-static fm_iterate_action_t restore_acquired_model(const fm_entry_t * p_entry, void * p_success)
+static bool restore_acquired_model(const fm_entry_t * p_entry)
 {
     access_model_state_data_t * p_model_data_entry = (access_model_state_data_t *) p_entry->data;
     uint16_t index = p_entry->header.handle & FLASH_HANDLE_TO_ACCESS_HANDLE_MASK;
@@ -741,19 +682,20 @@ static fm_iterate_action_t restore_acquired_model(const fm_entry_t * p_entry, vo
          *   flash or isn't allocated in the subscription list pool
          *
          * All of these conditions are signs that the user access init code has changed (order of
-         * allocation etc.)
+         * allocatio etc.)
          */
-        *((bool *) p_success) = false;
-        return FM_ITERATE_ACTION_STOP;
+        return false;
     }
-
-    if (p_model_data_entry->subscription_pool_index < ACCESS_SUBSCRIPTION_LIST_COUNT)
+    else
     {
-        ACCESS_INTERNAL_STATE_RESTORED_SET(m_subscription_list_pool[p_model_data_entry->subscription_pool_index].internal_state);
+        if (p_model_data_entry->subscription_pool_index < ACCESS_SUBSCRIPTION_LIST_COUNT)
+        {
+            ACCESS_INTERNAL_STATE_RESTORED_SET(m_subscription_list_pool[p_model_data_entry->subscription_pool_index].internal_state);
+        }
+        memcpy(&m_model_pool[index].model_info, p_model_data_entry, sizeof(access_model_state_data_t));
+        increment_model_count(p_model_data_entry->element_index, p_model_data_entry->model_id.company_id);
+        return true;
     }
-    memcpy(&m_model_pool[index].model_info, p_model_data_entry, sizeof(access_model_state_data_t));
-    increment_model_count(p_model_data_entry->element_index, p_model_data_entry->model_id.company_id);
-    return FM_ITERATE_ACTION_CONTINUE;
 }
 
 static inline void restore_addresses_for_model(const access_common_t * p_model)
@@ -775,37 +717,22 @@ static inline void restore_addresses_for_model(const access_common_t * p_model)
     }
 }
 
-#if ACCESS_MODEL_PUBLISH_PERIOD_RESTORE
-static inline void restore_publication_period(access_common_t * p_model)
-{
-    if (p_model->model_info.publication_period.step_num != 0)
-    {
-        access_publish_period_set(&p_model->publication_state,
-                                  (access_publish_resolution_t) p_model->model_info.publication_period.step_res,
-                                  p_model->model_info.publication_period.step_num);
-    }
-}
-#endif
-
 static inline bool restore_models(void)
 {
-    bool success;
-    uint32_t restore_count = restore_flash_data(FLASH_GROUP_MODEL, restore_acquired_model, &success);
-    if (success && restore_count > 0)
+    if (restore_flash_data(FLASH_GROUP_MODEL, ACCESS_MODEL_COUNT, restore_acquired_model) <= 0)
     {
-        for (access_model_handle_t i = 0; i < ACCESS_MODEL_COUNT; ++i)
-        {
-            if (m_model_pool[i].model_info.element_index != ACCESS_ELEMENT_INDEX_INVALID)
-            {
-                    restore_addresses_for_model(&m_model_pool[i]);
+        return false;
+    }
 
-    #if ACCESS_MODEL_PUBLISH_PERIOD_RESTORE
-                    restore_publication_period(&m_model_pool[i]);
-    #endif
-            }
+    for (access_model_handle_t i = 0; i < ACCESS_MODEL_COUNT; ++i)
+    {
+        if (m_model_pool[i].model_info.element_index != ACCESS_ELEMENT_INDEX_INVALID)
+        {
+                restore_addresses_for_model(&m_model_pool[i]);
         }
     }
-    return success;
+
+    return true;
 }
 
 static inline uint32_t metadata_store(void)
@@ -839,7 +766,7 @@ static inline uint32_t subscription_list_store(uint16_t index)
     else
     {
         access_flash_subscription_list_t * p_subs_list = (access_flash_subscription_list_t *) p_entry->data;
-        for (uint32_t i = 0; i < ARRAY_SIZE(p_subs_list->inverted_bitfield); ++i)
+        for (uint32_t i = 0; i < sizeof(p_subs_list->inverted_bitfield)/sizeof(p_subs_list->inverted_bitfield[0]); ++i)
         {
             p_subs_list->inverted_bitfield[i] = ~m_subscription_list_pool[index].bitfield[i];
         }
@@ -885,17 +812,6 @@ static inline uint32_t element_store(uint16_t element_index)
     }
 }
 
-
-/* Check if the given subscription list is stored in the flash */
-static bool subscription_list_is_stored(uint16_t index)
-{
-    fm_handle_filter_t filter = {
-        .mask = 0xffff,
-        .match = (FLASH_GROUP_SUBS_LIST | index),
-    };
-    return (flash_manager_entry_count_get(&m_flash_manager, &filter) > 0);
-}
-
 /* ********** Public API ********** */
 
 static void access_flash_config_clear(void)
@@ -915,19 +831,19 @@ static void access_flash_config_clear(void)
 
 bool access_flash_config_load(void)
 {
+    flash_manager_wait();
     m_metadata_stored = false;
-    access_flash_metadata_t metadata;
-    uint32_t metadata_size = sizeof(metadata);
-
-    if (flash_manager_entry_read(&m_flash_manager, FLASH_HANDLE_METADATA, &metadata, &metadata_size) != NRF_SUCCESS)
+    const fm_entry_t * p_metadata_entry = flash_manager_entry_get(&m_flash_manager, FLASH_HANDLE_METADATA);
+    if (p_metadata_entry == NULL)
     {
         return false;
     }
     bool config_restored = false;
     /* make sure that the stored flash data isn't too big for this firmware: */
-    if (metadata.element_count == ACCESS_ELEMENT_COUNT &&
-        metadata.model_count == ACCESS_MODEL_COUNT &&
-        metadata.subscription_list_count == ACCESS_SUBSCRIPTION_LIST_COUNT)
+    const access_flash_metadata_t * p_metadata = (const access_flash_metadata_t *) p_metadata_entry->data;
+    if (p_metadata->element_count == ACCESS_ELEMENT_COUNT &&
+        p_metadata->model_count == ACCESS_MODEL_COUNT &&
+        p_metadata->subscription_list_count == ACCESS_SUBSCRIPTION_LIST_COUNT)
     {
         m_metadata_stored = true;
         config_restored = restore_subscription_lists() && restore_elements() && restore_models();
@@ -948,7 +864,6 @@ void access_flash_config_store(void)
     uint32_t status = NRF_SUCCESS;
     /* Lock this call since it can be called by flash manager in bearer_event context in the listener callback.*/
     bearer_event_critical_section_begin();
-    m_access_flash_stable = false;
     /* If flash is being erased, no need to store anything now. */
     if (m_flash_not_ready)
     {
@@ -1010,74 +925,7 @@ void access_flash_config_store(void)
 {
 
 }
-
-static bool subscription_list_is_stored(uint16_t index)
-{
-    return (false);
-}
-
 #endif /* PERSISTENT_STORAGE */
-
-/* ********** Private API ********** */
-void access_incoming_handle(const access_message_rx_t * p_message)
-{
-    const nrf_mesh_address_t * p_dst = &p_message->meta_data.dst;
-
-    if (dsm_address_is_rx(p_dst))
-    {
-        uint16_t element_index;
-        dsm_handle_t address_handle = DSM_HANDLE_INVALID;
-        bool is_element_message = is_element_rx_address(p_dst, &element_index);
-
-        if (!is_element_message)
-        {
-            /* If it's not one of the element addresses, it has to be a subscription address. */
-            NRF_MESH_ERROR_CHECK(dsm_address_handle_get(p_dst, &address_handle));
-        }
-
-        for (int i = 0; i < ACCESS_MODEL_COUNT; ++i)
-        {
-            access_common_t * p_model = &m_model_pool[i];
-            uint32_t opcode_index;
-
-            bool address_match =
-                (is_element_message ? (p_model->model_info.element_index == element_index)
-                                    : (model_subscribes_to_addr(p_model, address_handle)));
-
-            if (ACCESS_INTERNAL_STATE_IS_ALLOCATED(p_model->internal_state) &&
-                address_match &&
-                bitfield_get(p_model->model_info.application_keys_bitfield, p_message->meta_data.appkey_handle) &&
-                is_opcode_of_model(p_model, p_message->opcode, &opcode_index))
-            {
-                if (p_dst->type == NRF_MESH_ADDRESS_TYPE_UNICAST)
-                {
-                    access_reliable_message_rx_cb(i, p_message, p_model->p_args);
-                }
-                p_model->p_opcode_handlers[opcode_index].handler(i, p_message, p_model->p_args);
-            }
-        }
-    }
-}
-
-uint32_t access_packet_tx(access_model_handle_t handle,
-                          const access_message_tx_t * p_tx_message,
-                          const uint8_t *p_access_payload,
-                          uint16_t access_payload_len)
-{
-    uint32_t status;
-    if (NULL == p_tx_message || NULL == p_access_payload || 0 == access_payload_len)
-    {
-        return NRF_ERROR_NULL;
-    }
-    else if (!check_tx_params(handle, p_tx_message, NULL, &status))
-    {
-        return status;
-    }
-
-    return packet_tx(handle, p_tx_message, NULL, p_access_payload,
-                     access_payload_len);
-}
-
 /* ********** Public API ********** */
 void access_clear(void)
 {
@@ -1094,8 +942,6 @@ void access_init(void)
     nrf_mesh_evt_handler_add(&m_evt_handler);
     access_reliable_init();
     access_publish_init();
-    access_publish_retransmission_init();
-    access_loopback_init();
 
     /* Initialize the flash manager */
     /* Assuming that we only need to play nice to DSM: */
@@ -1112,14 +958,14 @@ uint32_t access_model_add(const access_model_add_params_t * p_model_params,
                           access_model_handle_t * p_model_handle)
 {
     if (NULL == p_model_params ||
-        NULL == p_model_handle ||
-        (0 != p_model_params->opcode_count && NULL == p_model_params->p_opcode_handlers))
+        NULL == p_model_params->p_opcode_handlers ||
+        NULL == p_model_handle)
     {
         return NRF_ERROR_NULL;
     }
     *p_model_handle = ACCESS_HANDLE_INVALID;
 
-    if (0 == p_model_params->opcode_count && NULL != p_model_params->p_opcode_handlers)
+    if (0 == p_model_params->opcode_count)
     {
         return NRF_ERROR_INVALID_LENGTH;
     }
@@ -1167,35 +1013,14 @@ uint32_t access_model_add(const access_model_add_params_t * p_model_params,
 
 uint32_t access_model_publish(access_model_handle_t handle, const access_message_tx_t * p_message)
 {
-    uint32_t status;
-
     if (p_message == NULL)
     {
         return NRF_ERROR_NULL;
     }
-
-    uint16_t payload_length = 0;
-    uint8_t *p_payload;
-
-    status = packet_alloc_and_tx(handle, p_message, NULL, &p_payload, &payload_length);
-    if (NRF_SUCCESS != status)
-    {
-        return status;
-    }
-
-    if (m_model_pool[handle].model_info.publication_retransmit.count > 0)
-    {
-        access_publish_retransmission_message_add(handle,
-                                                  &m_model_pool[handle].model_info.publication_retransmit,
-                                                  p_message,
-                                                  p_payload,
-                                                  payload_length);
-    }
     else
     {
-        mesh_mem_free(p_payload);
+        return packet_tx(handle, p_message, NULL);
     }
-    return NRF_SUCCESS;
 }
 
 uint32_t access_model_reply(access_model_handle_t handle,
@@ -1206,24 +1031,9 @@ uint32_t access_model_reply(access_model_handle_t handle,
     {
         return NRF_ERROR_NULL;
     }
-
-    return packet_alloc_and_tx(handle, p_reply, p_message, NULL, NULL);
-}
-
-uint32_t access_model_element_index_get(access_model_handle_t handle, uint16_t * p_element_index)
-{
-    if (p_element_index == NULL)
-    {
-        return NRF_ERROR_NULL;
-    }
-    else if (!model_handle_valid_and_allocated(handle))
-    {
-        return NRF_ERROR_NOT_FOUND;
-    }
     else
     {
-        *p_element_index = m_model_pool[handle].model_info.element_index;
-        return NRF_SUCCESS;
+        return packet_tx(handle, p_reply, p_message);
     }
 }
 
@@ -1263,46 +1073,6 @@ uint32_t access_model_publish_address_get(access_model_handle_t handle, dsm_hand
     else
     {
         *p_address_handle = m_model_pool[handle].model_info.publish_address_handle;
-        return NRF_SUCCESS;
-    }
-}
-
-uint32_t access_model_publish_retransmit_set(access_model_handle_t handle,
-                                             access_publish_retransmit_t retransmit_params)
-{
-    if (ACCESS_MODEL_COUNT <= handle ||
-        !ACCESS_INTERNAL_STATE_IS_ALLOCATED(m_model_pool[handle].internal_state))
-    {
-        return NRF_ERROR_NOT_FOUND;
-    }
-    else if (m_model_pool[handle].model_info.publication_retransmit.count == retransmit_params.count &&
-             m_model_pool[handle].model_info.publication_retransmit.interval_steps == retransmit_params.interval_steps)
-    {
-        return NRF_SUCCESS;
-    }
-    else
-    {
-        m_model_pool[handle].model_info.publication_retransmit = retransmit_params;
-        ACCESS_INTERNAL_STATE_OUTDATED_SET(m_model_pool[handle].internal_state);
-        return NRF_SUCCESS;
-    }
-}
-
-uint32_t access_model_publish_retransmit_get(access_model_handle_t handle,
-                                             access_publish_retransmit_t * p_retransmit_params)
-{
-    if (p_retransmit_params == NULL)
-    {
-        return NRF_ERROR_NULL;
-    }
-    else if (ACCESS_MODEL_COUNT <= handle ||
-        !ACCESS_INTERNAL_STATE_IS_ALLOCATED(m_model_pool[handle].internal_state))
-    {
-        return NRF_ERROR_NOT_FOUND;
-    }
-    else
-    {
-        *p_retransmit_params = m_model_pool[handle].model_info.publication_retransmit;
         return NRF_SUCCESS;
     }
 }
@@ -1389,73 +1159,29 @@ uint32_t access_model_subscription_list_alloc(access_model_handle_t handle)
     }
 }
 
-uint32_t access_model_subscription_list_dealloc(access_model_handle_t handle)
-{
-    uint16_t sub_pool_index;
-
-    if (!model_handle_valid_and_allocated(handle))
-    {
-        return NRF_ERROR_NOT_FOUND;
-    }
-
-    sub_pool_index = m_model_pool[handle].model_info.subscription_pool_index;
-    if (ACCESS_SUBSCRIPTION_LIST_COUNT == sub_pool_index)
-    {
-        return NRF_SUCCESS;
-    }
-
-    if (ACCESS_SUBSCRIPTION_LIST_COUNT > sub_pool_index)
-    {
-        if (subscription_list_is_stored(sub_pool_index) || !m_access_flash_stable)
-        {
-            return NRF_ERROR_FORBIDDEN;
-        }
-
-        if (!model_subscription_list_is_shared(handle))
-        {
-            /* This also has an effect of clearing `OUTDATED` flag */
-            memset(&m_subscription_list_pool[sub_pool_index], 0, sizeof(m_subscription_list_pool[0]));
-            /* @todo: subscription list de-allocation will change once mesh_config is integrated with access */
-        }
-
-        m_model_pool[handle].model_info.subscription_pool_index = ACCESS_SUBSCRIPTION_LIST_COUNT;
-        ACCESS_INTERNAL_STATE_OUTDATED_SET(m_model_pool[handle].internal_state);
-
-        return NRF_SUCCESS;
-    }
-
-    return NRF_ERROR_INVALID_STATE;
-}
-
 uint32_t access_model_subscription_lists_share(access_model_handle_t owner, access_model_handle_t other)
 {
+    uint32_t status = NRF_ERROR_INVALID_STATE;
     if (!model_handle_valid_and_allocated(owner) || !model_handle_valid_and_allocated(other))
     {
-        return NRF_ERROR_NOT_FOUND;
+        status = NRF_ERROR_NOT_FOUND;
     }
-
-    if (ACCESS_SUBSCRIPTION_LIST_COUNT > m_model_pool[owner].model_info.subscription_pool_index)
+    else if (ACCESS_SUBSCRIPTION_LIST_COUNT > m_model_pool[owner].model_info.subscription_pool_index)
     {
 
         if (m_model_pool[other].model_info.subscription_pool_index == m_model_pool[owner].model_info.subscription_pool_index)
         {
-            return NRF_SUCCESS;
+            status = NRF_SUCCESS;
         }
-
-        if (ACCESS_SUBSCRIPTION_LIST_COUNT >= m_model_pool[other].model_info.subscription_pool_index)
+        else if (ACCESS_SUBSCRIPTION_LIST_COUNT == m_model_pool[other].model_info.subscription_pool_index)
         {
-            uint32_t status = access_model_subscription_list_dealloc(other);
-            if (status != NRF_SUCCESS)
-            {
-                return status;
-            }
-
             m_model_pool[other].model_info.subscription_pool_index = m_model_pool[owner].model_info.subscription_pool_index;
-            return NRF_SUCCESS;
+            ACCESS_INTERNAL_STATE_OUTDATED_SET(m_model_pool[other].internal_state);
+            status = NRF_SUCCESS;
         }
     }
 
-    return NRF_ERROR_INVALID_STATE;
+    return status;
 }
 
 uint32_t access_model_subscription_add(access_model_handle_t handle, dsm_handle_t address_handle)
@@ -1532,7 +1258,7 @@ uint32_t access_model_subscriptions_get(access_model_handle_t handle,
         *p_count = 0;
         for (uint32_t i = 0; i < DSM_ADDR_MAX; ++i)
         {
-            if (model_subscribes_to_addr(&m_model_pool[handle], i))
+            if (ACCESS_SUBSCRIPTION_LIST_COUNT > m_model_pool[handle].model_info.subscription_pool_index && bitfield_get(m_subscription_list_pool[m_model_pool[handle].model_info.subscription_pool_index].bitfield, i))
             {
                 if (*p_count >= max_count)
                 {
@@ -1568,6 +1294,7 @@ uint32_t access_model_application_bind(access_model_handle_t handle, dsm_handle_
     }
 }
 
+
 uint32_t access_model_application_unbind(access_model_handle_t handle, dsm_handle_t appkey_handle)
 {
     if (!model_handle_valid_and_allocated(handle))
@@ -1589,7 +1316,6 @@ uint32_t access_model_application_unbind(access_model_handle_t handle, dsm_handl
         return NRF_SUCCESS;
     }
 }
-
 uint32_t access_model_applications_get(access_model_handle_t handle,
                                        dsm_handle_t * p_appkey_handles,
                                        uint16_t * p_count)
@@ -1662,54 +1388,14 @@ uint32_t access_model_publish_application_get(access_model_handle_t handle,
     }
 }
 
-uint32_t access_default_ttl_set(uint8_t ttl)
+void access_default_ttl_set(uint8_t ttl)
 {
-    if ((ttl > NRF_MESH_TTL_MAX) || (ttl == 1))
-    {
-        return NRF_ERROR_INVALID_PARAM;
-    }
-    else
-    {
-        m_default_ttl = ttl;
-        return NRF_SUCCESS;
-    }
+    m_default_ttl = ttl & 0x7f;
 }
 
 uint8_t access_default_ttl_get(void)
 {
     return m_default_ttl;
-}
-
-uint32_t access_model_publish_friendship_credential_flag_set(access_model_handle_t handle, bool flag)
-{
-    if (!model_handle_valid_and_allocated(handle))
-    {
-        return NRF_ERROR_NOT_FOUND;
-    }
-    else if (m_model_pool[handle].model_info.friendship_credential_flag != flag)
-    {
-        ACCESS_INTERNAL_STATE_OUTDATED_SET(m_model_pool[handle].internal_state);
-    }
-
-    m_model_pool[handle].model_info.friendship_credential_flag = flag;
-    return NRF_SUCCESS;
-}
-
-uint32_t access_model_publish_friendship_credential_flag_get(access_model_handle_t handle, bool * p_flag)
-{
-    if (p_flag == NULL)
-    {
-        return NRF_ERROR_NULL;
-    }
-    else if (!model_handle_valid_and_allocated(handle))
-    {
-        return NRF_ERROR_NOT_FOUND;
-    }
-    else
-    {
-        *p_flag = m_model_pool[handle].model_info.friendship_credential_flag;
-        return NRF_SUCCESS;
-    }
 }
 
 uint32_t access_model_publish_ttl_set(access_model_handle_t handle, uint8_t ttl)
@@ -1914,60 +1600,4 @@ uint32_t access_model_p_args_get(access_model_handle_t handle, void ** pp_args)
         *pp_args = m_model_pool[handle].p_args;
         return NRF_SUCCESS;
     }
-}
-
-uint32_t access_model_publication_stop(access_model_handle_t handle)
-{
-    if (!model_handle_valid_and_allocated(handle))
-    {
-        return NRF_ERROR_NOT_FOUND;
-    }
-
-    access_publish_period_set(&m_model_pool[handle].publication_state, (access_publish_resolution_t)0, 0);
-    (void) access_model_reliable_cancel(handle);
-    (void) dsm_address_publish_remove(m_model_pool[handle].model_info.publish_address_handle);
-    m_model_pool[handle].model_info.publish_address_handle = DSM_HANDLE_INVALID;
-    m_model_pool[handle].model_info.publish_appkey_handle = DSM_HANDLE_INVALID;
-    m_model_pool[handle].model_info.publication_retransmit.count = 0;
-    m_model_pool[handle].model_info.publication_retransmit.interval_steps = 0;
-    m_model_pool[handle].model_info.publish_ttl = 0;
-    m_model_pool[handle].model_info.publication_period.step_num = 0;
-    m_model_pool[handle].model_info.publication_period.step_res = 0;
-    m_model_pool[handle].publication_state.period.step_num = 0;
-    m_model_pool[handle].publication_state.period.step_res = 0;
-    ACCESS_INTERNAL_STATE_OUTDATED_SET(m_model_pool[handle].internal_state);
-
-    return NRF_SUCCESS;
-}
-
-uint32_t access_model_publication_by_appkey_stop(dsm_handle_t appkey_handle)
-{
-    dsm_handle_t local_handle;
-
-    if (DSM_APP_MAX + DSM_DEVICE_MAX <= appkey_handle)
-    {
-        return NRF_ERROR_INVALID_PARAM;
-    }
-
-    for (access_model_handle_t i = 0; i < ACCESS_MODEL_COUNT; i++)
-    {
-        if (NRF_SUCCESS == access_model_publish_application_get(i, &local_handle))
-        {
-            if (local_handle == appkey_handle)
-            {
-                (void) access_model_publication_stop(i);
-            }
-        }
-    }
-
-    return NRF_SUCCESS;
-}
-
-const void * access_flash_area_get(void)
-{
-#ifdef ACCESS_FLASH_AREA_LOCATION
-    return (const flash_manager_page_t *) ACCESS_FLASH_AREA_LOCATION;
-#else
-    return (const flash_manager_page_t *) (((const uint8_t *) dsm_flash_area_get()) - (ACCESS_FLASH_PAGE_COUNT * PAGE_SIZE));
-#endif
 }

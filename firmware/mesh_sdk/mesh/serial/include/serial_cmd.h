@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -66,9 +66,6 @@
 #define SERIAL_OPCODE_CMD_DEVICE_BEACON_STOP                  (0x11) /**< Params: @ref serial_cmd_device_beacon_stop_t */
 #define SERIAL_OPCODE_CMD_DEVICE_BEACON_PARAMS_SET            (0x12) /**< Params: @ref serial_cmd_device_beacon_params_set_t */
 #define SERIAL_OPCODE_CMD_DEVICE_BEACON_PARAMS_GET            (0x13) /**< Params: @ref serial_cmd_device_beacon_params_get_t */
-#define SERIAL_OPCODE_CMD_DEVICE_HOUSEKEEPING_DATA_GET        (0x14) /**< Params: None. */
-#define SERIAL_OPCODE_CMD_DEVICE_HOUSEKEEPING_DATA_CLEAR      (0x15) /**< Params: None. */
-
 #define SERIAL_OPCODE_CMD_RANGE_DEVICE_END                    (0x1F) /**< DEVICE range end. */
 
 #define SERIAL_OPCODE_CMD_RANGE_APP_START                     (0x20) /**< APP range start. */
@@ -327,7 +324,6 @@ typedef struct __attribute((packed))
     uint16_t address;                         /**< Unicast address to assign to the device. */
     uint8_t  iv_update_flag;                  /**< IV update in progress flag. */
     uint8_t  key_refresh_flag;                /**< Key refresh in progress flag. */
-    uint8_t  attention_duration_s;            /**< Time in seconds during which the device will identify itself using any means it can. */
 } serial_cmd_prov_data_t;
 
 /** OOB method selection parameters. */
@@ -490,25 +486,20 @@ typedef struct __attribute((packed))
 /** Mesh packet send command parameters. */
 typedef struct __attribute((packed))
 {
-    uint16_t appkey_handle;             /**< Appkey or devkey handle to use for packet sending. Subnetwork will be picked automatically. */
-    uint16_t src_addr;                  /**< Raw unicast address to use as source address. Must be in the range of local unicast addresses. */
-    uint16_t dst_addr_handle;           /**< Handle of destination address to use in packet. */
-    uint8_t ttl;                        /**< Time To Live value to use in packet. */
-    uint8_t force_segmented;            /**< Whether or not to force use of segmented message type for the transmission. */
-    uint8_t transmic_size;              /**< Transport MIC size used enum. SMALL=0, LARGE=1, DEFAULT=2. LARGE may only be used with segmented packets. */
-    uint8_t friendship_credential_flag; /**< Control parameter for credentials used to publish messages from a model. 0 for master, 1 for friendship. */
+    uint16_t appkey_handle;   /**< Appkey or devkey handle to use for packet sending. Subnetwork will be picked automatically. */
+    uint16_t src_addr;        /**< Raw unicast address to use as source address. Must be in the range of local unicast addresses. */
+    uint16_t dst_addr_handle; /**< Handle of destination address to use in packet. */
+    uint8_t ttl;              /**< Time To Live value to use in packet. */
+    uint8_t reliable;         /**< Whether or not to make the transmission reliable. */
     uint8_t data[NRF_MESH_SERIAL_PAYLOAD_MAXLEN - SERIAL_CMD_MESH_PACKET_SEND_OVERHEAD];    /**< Payload of the packet. */
 } serial_cmd_mesh_packet_send_t;
-
-NRF_MESH_STATIC_ASSERT(sizeof(serial_cmd_mesh_packet_send_t) == NRF_MESH_SERIAL_PAYLOAD_MAXLEN);
-
 
 /** Mesh command parameters. */
 typedef union __attribute((packed))
 {
     serial_cmd_mesh_subnet_add_t                    subnet_add;                    /**< Subnet add parameters. */
     serial_cmd_mesh_subnet_update_t                 subnet_update;                 /**< Subnet update parameters. */
-    serial_cmd_mesh_subnet_delete_t                 subnet_delete;                 /**< Subnet delete parameters. */
+    serial_cmd_mesh_subnet_delete_t                 subnet_delete     ;            /**< Subnet delete parameters. */
 
     serial_cmd_mesh_appkey_add_t                    appkey_add;                    /**< Appkey add parameters. */
     serial_cmd_mesh_appkey_update_t                 appkey_update;                 /**< Appkey update parameters. */
@@ -629,7 +620,7 @@ typedef struct __attribute((packed))
 /** Used to update the location field of an element. */
 typedef struct __attribute((packed))
 {
-    uint16_t element_index; /**< Index of the addressed element. */
+    uint16_t element_index; /**< The index of the element addressed. */
     uint16_t location; /**< Location value for the element. */
 } serial_cmd_access_element_loc_set_t;
 
@@ -637,14 +628,14 @@ typedef struct __attribute((packed))
 typedef struct __attribute((packed))
 {
     access_model_handle_t model_handle; /**< Handle of the model that the access module should operate on. */
-    uint8_t ttl;                        /**< TTL for outgoing messages. */
+    uint8_t ttl;
 } serial_cmd_access_model_pub_ttl_set_t;
 
 /** Used to get the handle value for a model instance. */
 typedef struct __attribute((packed))
 {
-    uint16_t element_index;             /**< Index of the addressed element which owns the model. */
-    access_model_id_t model_id;         /**< Company and model IDs. */
+    uint16_t element_index;
+    access_model_id_t model_id;
 } serial_cmd_access_handle_get_t;
 
 /** Used to update the publish period of a model by updating resolution and number of steps. */
@@ -658,7 +649,7 @@ typedef struct __attribute((packed))
 /** Used by access commands that only require the element index */
 typedef struct __attribute((packed))
 {
-    uint16_t element_index;               /**< Index of the addressed element. */
+    uint16_t element_index;
 } serial_cmd_access_element_index_t;
 
 /** Used for initializing one of the available models */
@@ -668,15 +659,12 @@ typedef struct __attribute((packed))
     uint8_t data[NRF_MESH_SERIAL_PAYLOAD_MAXLEN - sizeof(serial_cmd_model_specific_init_header_t)]; /**< Additional data provided to the initializer */
 } serial_cmd_model_specific_init_t;
 
-NRF_MESH_STATIC_ASSERT(sizeof(serial_cmd_model_specific_init_t) == NRF_MESH_SERIAL_PAYLOAD_MAXLEN);
-
 /** Used for sending commands to one of the initialized models */
 typedef struct __attribute((packed))
 {
     serial_cmd_model_specific_command_header_t model_cmd_info; /**< Contains the handle of the model being addressed. */
     uint8_t data[NRF_MESH_SERIAL_PAYLOAD_MAXLEN - sizeof(serial_cmd_model_specific_command_header_t)]; /**< Additional data provided to the event */
 } serial_cmd_model_specific_command_t;
-NRF_MESH_STATIC_ASSERT(sizeof(serial_cmd_model_specific_command_t) == NRF_MESH_SERIAL_PAYLOAD_MAXLEN);
 
 /** ACCESS layer command parameters. */
 typedef union __attribute((packed))

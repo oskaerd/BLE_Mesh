@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -40,12 +40,11 @@
 #include <unity.h>
 #include <cmock.h>
 
-#include "utils.h"
+#include "nordic_common.h"
 
 #include "access_mock.h"
 #include "access_config_mock.h"
 #include "access_reliable_mock.h"
-#include "nrf_mesh_mock.h"
 
 #include "health_client.h"
 #include "health_messages.h"
@@ -105,9 +104,6 @@ static uint32_t access_model_publish_mock(access_model_handle_t handle, const ac
     TEST_ASSERT_EQUAL(m_publish_expected_opcode, p_message->opcode.opcode);
     TEST_ASSERT_EQUAL(ACCESS_COMPANY_ID_NONE, p_message->opcode.company_id);
     TEST_ASSERT_EQUAL(m_publish_expected_data_length, p_message->length);
-    TEST_ASSERT_EQUAL(false, p_message->force_segmented);
-    TEST_ASSERT_EQUAL(NRF_MESH_TRANSMIC_SIZE_DEFAULT, p_message->transmic_size);
-
     TEST_ASSERT_EQUAL_HEX8_ARRAY((const uint8_t *) mp_publish_expected_data, p_message->p_buffer, p_message->length);
 
     return NRF_SUCCESS;
@@ -175,9 +171,6 @@ void setUp(void)
     access_mock_Init();
     access_config_mock_Init();
     access_reliable_mock_Init();
-    nrf_mesh_mock_Init();
-
-    nrf_mesh_unique_token_get_IgnoreAndReturn((nrf_mesh_tx_token_t)0x55AA55AAul);
 
     access_model_add_StubWithCallback(access_model_add_mock);
     access_model_publish_StubWithCallback(access_model_publish_mock);
@@ -196,8 +189,6 @@ void tearDown(void)
     access_config_mock_Destroy();
     access_reliable_mock_Verify();
     access_reliable_mock_Destroy();
-    nrf_mesh_mock_Verify();
-    nrf_mesh_mock_Destroy();
 }
 
 /********** Health client event handler **********/
@@ -238,13 +229,7 @@ void tearDown(void)
     do { \
         m_event_expected = true; \
         m_expected_evt_type = HEALTH_CLIENT_EVT_TYPE_TIMEOUT; \
-    } while(0)
-
-#define EXPECT_EVT_CANCELLED() \
-    do { \
-        m_event_expected = true; \
-        m_expected_evt_type = HEALTH_CLIENT_EVT_TYPE_CANCELLED; \
-    } while(0)
+    } while(0);
 
 static bool m_event_expected = false;
 static health_client_evt_type_t m_expected_evt_type;
@@ -285,8 +270,6 @@ static void event_handler(const health_client_t * p_client, const health_client_
             TEST_ASSERT_EQUAL(m_expected_evt_data.attention_status.attention, p_event->data.attention_status.attention);
             break;
         case HEALTH_CLIENT_EVT_TYPE_TIMEOUT:
-            break;
-        case HEALTH_CLIENT_EVT_TYPE_CANCELLED:
             break;
         default:
             TEST_FAIL_MESSAGE("invalid event test detected in event_handler()");
@@ -473,6 +456,7 @@ void test_messages(void)
     }
 }
 
+/*
 void test_timeout(void)
 {
     health_client_t client;
@@ -485,25 +469,5 @@ void test_timeout(void)
     TEST_ASSERT_EQUAL(NRF_SUCCESS, health_client_fault_test(&client, 0x1234, 10, true));
     access_model_reliable_complete_transaction();
 }
+*/
 
-void test_cancelled(void)
-{
-    health_client_t client;
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, health_client_init(&client, TEST_ELEMENT_INDEX, event_handler));
-
-    health_msg_fault_test_t expected_data = { .test_id = 10, .company_id = 0x1234 };
-    EXPECT_RELIABLE_TX(TEST_MODEL_HANDLE, HEALTH_OPCODE_FAULT_TEST, HEALTH_OPCODE_FAULT_STATUS, &expected_data, sizeof(expected_data),
-            ACCESS_RELIABLE_TRANSFER_CANCELLED);
-    EXPECT_EVT_CANCELLED();
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, health_client_fault_test(&client, 0x1234, 10, true));
-    access_model_reliable_complete_transaction();
-}
-
-void test_pending_msg_cancel(void)
-{
-    health_client_t client;
-    TEST_ASSERT_EQUAL(NRF_SUCCESS, health_client_init(&client, TEST_ELEMENT_INDEX, event_handler));
-
-    access_model_reliable_cancel_ExpectAndReturn(m_model_handle, NRF_SUCCESS);
-    health_client_pending_msg_cancel(&client);
-}

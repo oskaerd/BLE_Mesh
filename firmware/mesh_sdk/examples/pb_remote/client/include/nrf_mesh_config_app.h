@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -47,17 +47,6 @@
  */
 
 /**
- * @defgroup MODEL_CONFIG Model layer configuration parameters
- */
-
-/** Define for acknowledging message transaction timeout.
- * @note Mesh Profile Specification v1.0 recommends this to be minimum 60s.
- */
-#define MODEL_ACKNOWLEDGED_TRANSACTION_TIMEOUT  (SEC_TO_US(10))
-
-/** @} end of MODEL_CONFIG */
-
-/**
  * @defgroup DEVICE_CONFIG Device configuration
  *
  * @{
@@ -66,11 +55,14 @@
 /** Device company identifier. */
 #define DEVICE_COMPANY_ID (ACCESS_COMPANY_ID_NONE)
 
-/** Device product identifier. */
+/** Device product identifier*/
 #define DEVICE_PRODUCT_ID (0x0000)
 
-/** Device version identifier. */
+/** Device version identifier */
 #define DEVICE_VERSION_ID (0x0000)
+
+/** Supported features of the device. @see config_feature_bit_t */
+#define DEVICE_FEATURES (CONFIG_FEATURE_RELAY_BIT)
 
 /** @} end of DEVICE_CONFIG */
 
@@ -90,7 +82,7 @@
  * @note This value has to be greater than two to fit the configuration and health models,
  * plus the number of models needed by the application.
  */
-#define ACCESS_MODEL_COUNT (3)
+#define ACCESS_MODEL_COUNT (2)
 
 /**
  * The number of elements in the application.
@@ -114,11 +106,11 @@
 #define ACCESS_FLASH_PAGE_COUNT (1)
 
 /**
- * @defgroup ACCESS_RELIABLE_CONFIG Configuration of access layer reliable transfer
+ * @defgroup ACCESS_RELIABLE_CONFIG Access reliable transfer configuration
  * @{
  */
 
-/** Number of the allowed parallel transfers (size of the internal context pool). */
+/** Number of allowed parallel transfers (size of internal context pool). */
 #define ACCESS_RELIABLE_TRANSFER_COUNT (ACCESS_MODEL_COUNT)
 
 /** @} end of ACCESS_RELIABLE_CONFIG */
@@ -134,15 +126,15 @@
  */
 /** Maximum number of subnetworks. */
 #define DSM_SUBNET_MAX                                  (1)
-/** Maximum number of applications. */
+/** Maximum number of applications */
 #define DSM_APP_MAX                                     (1)
-/** Maximum number of device keys. */
+/** Maximum number of device keys */
 #define DSM_DEVICE_MAX                                  (5)
 /** Maximum number of virtual addresses. */
 #define DSM_VIRTUAL_ADDR_MAX                            (1)
 /** Maximum number of non-virtual addresses. One for the client itself and one for each of the potential provisionees. */
 #define DSM_NONVIRTUAL_ADDR_MAX                         (DSM_DEVICE_MAX-1)
-/** Number of flash pages reserved for the DSM storage. */
+/** Number of flash pages reserved for the DSM storage */
 #define DSM_FLASH_PAGE_COUNT                            (1)
 /** @} end of DSM_CONFIG */
 

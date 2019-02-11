@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -56,27 +56,19 @@ typedef enum
     NRF_MESH_PROV_EVT_LINK_ESTABLISHED,
     /** Provisioning link lost. */
     NRF_MESH_PROV_EVT_LINK_CLOSED,
-    /** Provisioning invite received. */
-    NRF_MESH_PROV_EVT_INVITE_RECEIVED,
-    /** Provisioning start received. */
-    NRF_MESH_PROV_EVT_START_RECEIVED,
     /** Provisioning output request. */
     NRF_MESH_PROV_EVT_OUTPUT_REQUEST,
-    /** Provisioning input request. Reply to this event with
-     * @ref nrf_mesh_prov_auth_data_provide(). */
+    /** Provisioning input request. */
     NRF_MESH_PROV_EVT_INPUT_REQUEST,
-    /** Provisioning static data request. Reply to this event with
-     * @ref nrf_mesh_prov_auth_data_provide(). */
+    /** Provisioning static data request. */
     NRF_MESH_PROV_EVT_STATIC_REQUEST,
-    /** OOB public key requested. Reply to this event with
-     * @ref nrf_mesh_prov_pubkey_provide(). */
+    /** OOB public key requested. */
     NRF_MESH_PROV_EVT_OOB_PUBKEY_REQUEST,
     /** Provisionee capabilities received. */
     NRF_MESH_PROV_EVT_CAPS_RECEIVED,
     /** Provisioning completed. */
     NRF_MESH_PROV_EVT_COMPLETE,
-    /** ECDH calculation requested. Reply to this event with
-     * @ref nrf_mesh_prov_shared_secret_provide(). */
+    /** ECDH calculation requested. */
     NRF_MESH_PROV_EVT_ECDH_REQUEST,
     /** Provisioning failed message received. */
     NRF_MESH_PROV_EVT_FAILED
@@ -118,26 +110,6 @@ typedef struct
     /** Reason for closing the link. */
     nrf_mesh_prov_link_close_reason_t close_reason;
 } nrf_mesh_prov_evt_link_closed_t;
-
-/**
- * Provisioning invite event
- */
-typedef struct
-{
-    /** Provisioning context pointer. */
-    nrf_mesh_prov_ctx_t * p_context;
-    /** Time in seconds during which the device will identify itself using any means it can. */
-    uint8_t attention_duration_s;
-} nrf_mesh_prov_evt_invite_received_t;
-
-/**
- * Provisioning start event
- */
-typedef struct
-{
-    /** Provisioning context pointer. */
-    nrf_mesh_prov_ctx_t * p_context;
-} nrf_mesh_prov_evt_start_received_t;
 
 /**
  * Provisioning input requested event.
@@ -204,10 +176,23 @@ typedef struct
 {
     /** Provisioning context pointer. */
     nrf_mesh_prov_ctx_t * p_context;
+    /** Pointer to the received network key. This must be copied into static memory before use. */
+    const uint8_t * p_netkey;
     /** Device key of the provisioned device. This must be copied into static memory before use. */
     const uint8_t * p_devkey;
-    /** Pointer to provisioning data structure. */
-    const nrf_mesh_prov_provisioning_data_t * p_prov_data;
+    /** IV index for the network. */
+    uint32_t iv_index;
+    /** Network key index. */
+    uint16_t netkey_index;
+    /** Unicast address for the device. */
+    uint16_t address;
+    /** Flags. */
+    struct {
+        /** IV update in progress flag. */
+        uint8_t iv_update   : 1;
+        /** Key refresh in progress flag. */
+        uint8_t key_refresh : 1;
+    } flags;
 } nrf_mesh_prov_evt_complete_t;
 
 /**
@@ -261,10 +246,6 @@ typedef struct
         nrf_mesh_prov_evt_link_established_t    link_established;
         /** Provisioning link lost event. */
         nrf_mesh_prov_evt_link_closed_t         link_closed;
-        /** Provisioning invite event */
-        nrf_mesh_prov_evt_invite_received_t     invite_received;
-        /** Provisioning start event */
-        nrf_mesh_prov_evt_start_received_t      start_received;
         /** Provisioning input requested. */
         nrf_mesh_prov_evt_input_request_t       input_request;
         /** Provisioning output requested. */

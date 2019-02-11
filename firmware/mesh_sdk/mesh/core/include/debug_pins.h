@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -38,8 +38,6 @@
 #define DEBUG_PINS_H__
 
 #include <stdint.h>
-#include <stdbool.h>
-#include "nrf.h"
 
 /* Define debug pins that fit the standard development kits for the two chips. Placed to avoid
  * overlapping functionality. */
@@ -179,14 +177,13 @@ DEBUG_PIN_MODULE(TIMESLOT, false)
 #define DEBUG_PIN_TS_TIMER_HANDLER           DEBUG_PIN3
 #define DEBUG_PIN_TS_SD_EVT_HANDLER          DEBUG_PIN4
 #define DEBUG_PIN_TS_END_TIMER_HANDLER       DEBUG_PIN5
-#define DEBUG_PIN_TS_HIGH_PRIORITY           DEBUG_PIN6
+#define DEBUG_PIN_TS_TIMESLOT_OPERATION      DEBUG_PIN6
 #define DEBUG_PIN_TS_EXTEND_SUCCEEDED        DEBUG_PIN7
 
 DEBUG_PIN_MODULE(BEARER_HANDLER, false)
 #define DEBUG_PIN_BEARER_HANDLER_ACTION         DEBUG_PIN0
 #define DEBUG_PIN_BEARER_HANDLER_SCANNER        DEBUG_PIN1
 #define DEBUG_PIN_BEARER_HANDLER_SCANNER_STOP   DEBUG_PIN2
-#define DEBUG_PIN_BEARER_HANDLER_TIMER_SETUP    DEBUG_PIN3
 
 DEBUG_PIN_MODULE(SCANNER, false)
 #define DEBUG_PIN_SCANNER_RADIO_IN_RX       DEBUG_PIN0

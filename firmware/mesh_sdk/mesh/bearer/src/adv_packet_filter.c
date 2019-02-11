@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -89,7 +89,7 @@ void bearer_adv_packet_filtering_set(bool onoff)
 
 void bearer_adv_packet_remove(ble_packet_type_t type)
 {
-    m_adv_packet_filter.adv_filter &= ~(uint16_t)(1u << type);
+    m_adv_packet_filter.adv_filter &= ~((uint16_t)1u << type);
 }
 
 void bearer_adv_packet_add(ble_packet_type_t type)

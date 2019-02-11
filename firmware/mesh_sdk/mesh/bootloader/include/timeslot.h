@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -87,6 +87,13 @@ void timeslot_restart(void);
  * @return NRF_ERROR_INVALID_STATE There is already a timesot in progress.
  */
 uint32_t timeslot_resume(void);
+
+/**
+ * Get the timestamp sampled at the beginning of the timeslot.
+ *
+ * @return The start of the current timeslot.
+ */
+timestamp_t timeslot_start_time_get(void);
 
 /**
  * Get the timestamp for the projected end of the current timeslot.

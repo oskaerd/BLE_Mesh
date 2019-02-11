@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -117,10 +117,7 @@ static network_state_t m_net_state;
 static timer_event_t m_iv_update_timer;
 /** IV update test mode state */
 static bool m_test_mode;
-static bool m_enabled;
-static bool m_iv_state_set;
 
-static nrf_mesh_evt_handler_t m_mesh_evt_handler;
 /*****************************************************************************
 * Static functions
 *****************************************************************************/
@@ -133,19 +130,11 @@ static inline bool iv_timeout_limit_passed(uint32_t timeout)
 }
 
 /* Notify user of the new IV index. */
-static void iv_index_notify(const uint8_t * p_network_id)
+static void iv_index_notify(uint32_t iv_index, net_state_iv_update_t state)
 {
     nrf_mesh_evt_t app_event;
-    if (m_net_state.iv_update.state == NET_STATE_IV_UPDATE_IN_PROGRESS)
-    {
-        app_event.params.iv_update.iv_index = m_net_state.iv_index - 1;
-    }
-    else
-    {
-        app_event.params.iv_update.iv_index = m_net_state.iv_index;
-    }
-    app_event.params.iv_update.state = m_net_state.iv_update.state;
-    app_event.params.iv_update.p_network_id = p_network_id;
+    app_event.params.iv_update.iv_index = iv_index;
+    app_event.params.iv_update.state = state;
     app_event.type = NRF_MESH_EVT_IV_UPDATE_NOTIFICATION;
     event_handle(&app_event);
 }
@@ -172,7 +161,7 @@ static bool iv_update_trigger_if_pending(void)
                 RESET_SEQNUM_MAX();
                 m_net_state.iv_update.state = NET_STATE_IV_UPDATE_NORMAL;
                 m_net_state.iv_update.timeout_counter = 0;
-                iv_index_notify(NULL);
+                iv_index_notify(m_net_state.iv_index, m_net_state.iv_update.state);
                 flash_store_iv_index();
                 seqnum_block_allocate();
                 break;
@@ -227,67 +216,6 @@ static void iv_update_timer_handler(timestamp_t timestamp, void * p_context)
     }
 }
 
-static void incoming_data_received(const uint8_t * p_network_id, uint32_t iv_index, bool iv_update, bool key_refresh)
-{
-    if (m_net_state.iv_update.state == NET_STATE_IV_UPDATE_NORMAL)
-    {
-        if (m_net_state.iv_update.ivr_timeout_counter == 0 &&
-            ((!iv_update && iv_index > m_net_state.iv_index) ||
-             (iv_update && iv_index > m_net_state.iv_index + 1)))
-        {
-            if (iv_index <= (m_net_state.iv_index + NETWORK_IV_RECOVERY_LIMIT) &&
-                !m_net_state.iv_update.locked)
-            {
-                /* We've fallen behind on IV indexes, and should silently
-                 * adopt the other, higher IV index. */
-                m_net_state.iv_index = iv_index;
-                m_net_state.seqnum = 0;
-                RESET_SEQNUM_MAX();
-                m_net_state.iv_update.timeout_counter = 0;
-                m_net_state.iv_update.ivr_timeout_counter = IV_RECOVERY_TIMEOUT;
-                m_net_state.iv_update.pending = false;
-                m_net_state.iv_update.state = NET_STATE_IV_UPDATE_NORMAL;
-                flash_store_iv_index();
-                seqnum_block_allocate();
-                iv_index_notify(p_network_id);
-            }
-        }
-        else if (iv_update && iv_index == m_net_state.iv_index + 1)
-        {
-            m_net_state.iv_update.pending = true;
-            (void) iv_update_trigger_if_pending();
-        }
-    }
-    else if (m_net_state.iv_update.state == NET_STATE_IV_UPDATE_IN_PROGRESS)
-    {
-        if (!iv_update && iv_index == m_net_state.iv_index)
-        {
-            m_net_state.iv_update.pending = true;
-            (void) iv_update_trigger_if_pending();
-        }
-    }
-}
-
-static void mesh_evt_handler(const nrf_mesh_evt_t * p_evt)
-{
-    if (p_evt->type == NRF_MESH_EVT_NET_BEACON_RECEIVED &&
-        p_evt->params.net_beacon.p_beacon_info->iv_update_permitted)
-    {
-        incoming_data_received(p_evt->params.net_beacon.p_beacon_secmat->net_id,
-                               p_evt->params.net_beacon.iv_index,
-                               (p_evt->params.net_beacon.flags.iv_update == NET_STATE_IV_UPDATE_IN_PROGRESS),
-                               p_evt->params.net_beacon.flags.key_refresh);
-    }
-#if MESH_FEATURE_LPN_ENABLED
-    else if (p_evt->type == NRF_MESH_EVT_LPN_FRIEND_UPDATE)
-    {
-        incoming_data_received(NULL,
-                               p_evt->params.friend_update.iv_index,
-                               p_evt->params.friend_update.iv_update_active,
-                               p_evt->params.friend_update.key_refresh_in_phase2);
-    }
-#endif
-}
 /*****************************************************************************
 * FLASH MANAGER CODE
 *****************************************************************************/
@@ -300,12 +228,6 @@ typedef struct
 } net_flash_data_iv_index_t;
 
 typedef uint32_t net_flash_data_sequence_number_t;
-
-typedef struct
-{
-    const net_flash_data_iv_index_t * p_iv_index_data;
-    const net_flash_data_sequence_number_t * p_seqnum_data;
-} entry_recover_context_t;
 
 /** Flash manager handling Network state flash storage. */
 static flash_manager_t m_flash_manager;
@@ -338,8 +260,8 @@ static void seqnum_block_allocate(void)
             else
             {
                 p_new_entry->data[0] = next_block;
-                m_seqnum_allocation_in_progress = true;
                 flash_manager_entry_commit(p_new_entry);
+                m_seqnum_allocation_in_progress = true;
             }
         }
     }
@@ -412,30 +334,32 @@ static void init_flash_storage(void)
     }
 }
 
-static fm_iterate_action_t entry_recover_cb(const fm_entry_t * p_entry, void * p_args)
-{
-    entry_recover_context_t * p_context = p_args;
-    switch (p_entry->header.handle)
-    {
-        case FLASH_HANDLE_IV_INDEX:
-            p_context->p_iv_index_data = (const net_flash_data_iv_index_t *) p_entry->data;
-            break;
-        case FLASH_HANDLE_SEQNUM:
-            p_context->p_seqnum_data = (const net_flash_data_sequence_number_t *) p_entry->data;
-            break;
-        default:
-            break;
-    }
-    return FM_ITERATE_ACTION_CONTINUE;
-}
-
 void net_state_recover_from_flash(void)
 {
+    flash_manager_wait();
     bearer_event_critical_section_begin();
-    entry_recover_context_t context = {NULL, NULL};
-    (void) flash_manager_entries_read(&m_flash_manager, NULL, entry_recover_cb, &context);
+    const net_flash_data_iv_index_t * p_iv_index_data = NULL;
+    const net_flash_data_sequence_number_t * p_seqnum_data = NULL;
 
-    if (context.p_iv_index_data == NULL || context.p_seqnum_data == NULL)
+    const fm_entry_t * p_entry = flash_manager_entry_next_get(&m_flash_manager, NULL, NULL);
+
+    while (p_entry != NULL)
+    {
+        switch (p_entry->header.handle)
+        {
+            case FLASH_HANDLE_IV_INDEX:
+                p_iv_index_data = (const net_flash_data_iv_index_t *) p_entry->data;
+                break;
+            case FLASH_HANDLE_SEQNUM:
+                p_seqnum_data = (const net_flash_data_sequence_number_t *) p_entry->data;
+                break;
+            default:
+                break;
+        }
+        p_entry = flash_manager_entry_next_get(&m_flash_manager, NULL, p_entry);
+    }
+
+    if (p_iv_index_data == NULL || p_seqnum_data == NULL)
     {
         /* Need both data types to consider the storage valid. Reset state and flash both. */
         m_net_state.seqnum = 0;
@@ -445,10 +369,10 @@ void net_state_recover_from_flash(void)
     }
     else
     {
-        m_net_state.iv_index = context.p_iv_index_data->iv_index;
-        m_net_state.iv_update.state = (net_state_iv_update_t) context.p_iv_index_data->iv_update_in_progress;
+        m_net_state.iv_index = p_iv_index_data->iv_index;
+        m_net_state.iv_update.state = (net_state_iv_update_t) p_iv_index_data->iv_update_in_progress;
 
-        if (((const void *) context.p_seqnum_data < (const void *) context.p_iv_index_data) && !context.p_iv_index_data->iv_update_in_progress)
+        if (((const void *) p_seqnum_data < (const void *) p_iv_index_data) && !p_iv_index_data->iv_update_in_progress)
         {
             /* At the end of the IV update state, we always flash the IV index data first, then flash
             * the sequence number after. If we found the sequence number entry before the IV index
@@ -459,7 +383,7 @@ void net_state_recover_from_flash(void)
         }
         else
         {
-            m_net_state.seqnum = *context.p_seqnum_data;
+            m_net_state.seqnum = *p_seqnum_data;
         }
     }
 
@@ -477,7 +401,6 @@ void net_state_reset(void)
         flash_manager_entry_invalidate(&m_flash_manager, FLASH_HANDLE_IV_INDEX) == NRF_SUCCESS)
     {
         memset(&m_net_state, 0, sizeof(m_net_state));
-        m_iv_state_set = false;
     }
     else
     {
@@ -514,7 +437,6 @@ void net_state_recover_from_flash(void)
 void net_state_reset(void)
 {
     memset(&m_net_state, 0, sizeof(m_net_state));
-    m_iv_state_set = false;
     RESET_SEQNUM_MAX();
 }
 const void * net_state_flash_area_get(void)
@@ -536,22 +458,12 @@ void net_state_init(void)
     m_iv_update_timer.p_next = NULL;
     m_test_mode = false;
 
+    timer_sch_schedule(&m_iv_update_timer);
 #if PERSISTENT_STORAGE
     init_flash_storage();
 #else
     RESET_SEQNUM_MAX();
 #endif
-}
-
-void net_state_enable(void)
-{
-    if (!m_enabled)
-    {
-        m_mesh_evt_handler.evt_cb = mesh_evt_handler;
-        nrf_mesh_evt_handler_add(&m_mesh_evt_handler);
-        timer_sch_schedule(&m_iv_update_timer);
-        m_enabled = true;
-    }
 }
 
 uint32_t net_state_seqnum_alloc(uint32_t * p_seqnum)
@@ -603,7 +515,7 @@ uint32_t net_state_iv_update_start(void)
         m_net_state.iv_update.timeout_counter = 0;
         m_net_state.iv_index = m_net_state.iv_index + 1;
         flash_store_iv_index();
-        iv_index_notify(NULL);
+        iv_index_notify(m_net_state.iv_index - 1, m_net_state.iv_update.state);
         status = NRF_SUCCESS;
     }
     else
@@ -617,22 +529,6 @@ uint32_t net_state_iv_update_start(void)
 void net_state_iv_update_test_mode_set(bool test_mode_on)
 {
     m_test_mode = test_mode_on;
-}
-
-uint32_t net_state_test_mode_transition_run(net_state_iv_update_signals_t signal)
-{
-    if ((signal == NET_STATE_TO_IV_UPDATE_IN_PROGRESS_SIGNAL &&
-         m_net_state.iv_update.state == NET_STATE_IV_UPDATE_IN_PROGRESS) ||
-        (signal == NET_STATE_TO_NORMAL_SIGNAL &&
-         m_net_state.iv_update.state == NET_STATE_IV_UPDATE_NORMAL))
-    {
-        return NRF_ERROR_FORBIDDEN;
-    }
-
-    m_net_state.iv_update.pending = true;
-    (void) iv_update_trigger_if_pending();
-
-    return NRF_SUCCESS;
 }
 
 void net_state_iv_index_lock(bool lock)
@@ -655,14 +551,59 @@ void net_state_iv_index_lock(bool lock)
     }
 }
 
-void net_state_key_refresh_phase_changed(uint16_t subnet_index, const uint8_t * p_network_id, nrf_mesh_key_refresh_phase_t new_phase)
+void net_state_key_refresh_phase_changed(uint16_t subnet_index, nrf_mesh_key_refresh_phase_t new_phase)
 {
     nrf_mesh_evt_t app_event;
     app_event.params.key_refresh.subnet_index = subnet_index;
     app_event.params.key_refresh.phase = new_phase;
-    app_event.params.key_refresh.p_network_id = p_network_id;
     app_event.type = NRF_MESH_EVT_KEY_REFRESH_NOTIFICATION;
     event_handle(&app_event);
+}
+
+void net_state_beacon_received(uint32_t iv_index, bool iv_update, bool key_refresh)
+{
+    bearer_event_critical_section_begin();
+
+    if (m_net_state.iv_update.state == NET_STATE_IV_UPDATE_NORMAL)
+    {
+        if (m_net_state.iv_update.ivr_timeout_counter == 0 && (
+                    (!iv_update && iv_index > m_net_state.iv_index)
+                 || (iv_update && iv_index > m_net_state.iv_index + 1)
+           ))
+        {
+            if (iv_index <= (m_net_state.iv_index + NETWORK_IV_RECOVERY_LIMIT) &&
+                !m_net_state.iv_update.locked)
+            {
+                /* We've fallen behind on IV indexes, and should silently
+                 * adopt the other, higher IV index. */
+                m_net_state.iv_index = iv_index;
+                m_net_state.seqnum = 0;
+                RESET_SEQNUM_MAX();
+                m_net_state.iv_update.timeout_counter = 0;
+                m_net_state.iv_update.ivr_timeout_counter = IV_RECOVERY_TIMEOUT;
+                m_net_state.iv_update.pending = false;
+                m_net_state.iv_update.state = NET_STATE_IV_UPDATE_NORMAL;
+                flash_store_iv_index();
+                seqnum_block_allocate();
+                iv_index_notify(m_net_state.iv_index, m_net_state.iv_update.state);
+            }
+        }
+        else if (iv_update && iv_index == m_net_state.iv_index + 1)
+        {
+            m_net_state.iv_update.pending = true;
+            (void) iv_update_trigger_if_pending();
+        }
+    }
+    else if (m_net_state.iv_update.state == NET_STATE_IV_UPDATE_IN_PROGRESS)
+    {
+        if (!iv_update && iv_index == m_net_state.iv_index)
+        {
+            m_net_state.iv_update.pending = true;
+            (void) iv_update_trigger_if_pending();
+        }
+    }
+
+    bearer_event_critical_section_end();
 }
 
 uint32_t net_state_beacon_iv_index_get(void)
@@ -705,24 +646,18 @@ net_state_iv_update_t net_state_iv_update_get(void)
 
 uint32_t net_state_iv_index_set(uint32_t iv_index, bool iv_update)
 {
-    if (m_iv_state_set)
+    static bool iv_state_set = false;
+    if (iv_state_set)
     {
         return NRF_ERROR_INVALID_STATE;
     }
     else
     {
-        m_iv_state_set = true;
+        iv_state_set = true;
         m_net_state.iv_index = iv_index;
         m_net_state.iv_update.state =
             iv_update ? NET_STATE_IV_UPDATE_IN_PROGRESS : NET_STATE_IV_UPDATE_NORMAL;
         flash_store_iv_index();
-        iv_index_notify(NULL);
-
-        /* Force reseting of sequence numbers upon IV index set */
-        m_net_state.seqnum = 0;
-        RESET_SEQNUM_MAX();
-        seqnum_block_allocate();
-
         return NRF_SUCCESS;
     }
 }

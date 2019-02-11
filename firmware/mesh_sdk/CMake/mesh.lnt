@@ -9,9 +9,6 @@
 // Allow parsing ridiculously long lines (required for parsing certain mock files):
 +linebuf
 
-// Silence "module" log lines
--v
-
 // ----------------------------------------------------------------------------
 // Compiler/library settings
 // ----------------------------------------------------------------------------
@@ -33,7 +30,6 @@
 -d__current_pc()=0x12345678  // Macro for returning the current PC
 -d__MODULE__=__FILE__        // ARMCC-specific define, supposed to provide __FILE__ without the pathname
 -d__CC_ARM                   // We use armcc, so let lint pretend to be armcc as well
--d__LINT__                   // Definition to let people know that PC-Lint is coming to town
 
 // Enable support for variable-length arrays:
 +fvl
@@ -161,10 +157,10 @@
 -emacro(778, IS_WORD_ALIGNED)
 
 // Mark the assertion handler as noreturn:
--sem(mesh_assertion_handler, r_no)
+-sem(m_assertion_handler, r_no)
 
 // Calls to TEST_NRF_MESH_ASSERT_EXPECT with void functions as argument causes Lint to complain;
-// it thinks the return value of the functions are going to be used for something, but it's not:
+// it thinks the return value of the functions are going to be used for something, but it's not: 
 -ecall(144, TEST_NRF_MESH_ASSERT_EXPECT)
 -ecall(516, TEST_NRF_MESH_ASSERT_EXPECT)
 

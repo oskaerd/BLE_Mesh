@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -81,11 +81,6 @@ void radio_config_reset(void)
     NRF_RADIO->CRCINIT = ((RADIO_CONFIG_CRC_ADV_INIT << RADIO_CRCINIT_CRCINIT_Pos) & RADIO_CRCINIT_CRCINIT_Msk);
 
     NRF_RADIO->TIFS = RADIO_CONFIG_DEFAULT_TIFS;
-
-#ifdef NRF52_SERIES
-    /* Enable fast ramup on nRF52 */
-    NRF_RADIO->MODECNF0 |= ((RADIO_MODECNF0_RU_Fast << RADIO_MODECNF0_RU_Pos) & RADIO_MODECNF0_RU_Msk);
-#endif
 }
 
 /**
@@ -142,14 +137,11 @@ void radio_config_config(const radio_config_t * const p_config)
 
 #ifdef NRF52_SERIES
     NRF_RADIO->PCNF0 |= ((RADIO_PCNF0_S1INCL_Include << RADIO_PCNF0_S1INCL_Pos) & RADIO_PCNF0_S1INCL_Msk);
-#if  NRF_SD_BLE_API_VERSION >= 5
     /* BLE 2Mbit requires a 16bit preamble */
     if (p_config->radio_mode == RADIO_MODE_MODE_Ble_2Mbit)
     {
         NRF_RADIO->PCNF0 |= ((RADIO_PCNF0_PLEN_16bit << RADIO_PCNF0_PLEN_Pos) & RADIO_PCNF0_PLEN_Msk);
     }
-#endif
-
 #endif
 }
 

@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -43,7 +43,7 @@
 /**
  * @defgroup REPLAY_CACHE Replay protection cache
  * @ingroup MESH_CORE
- * Stores information so that an already processed message originating from one
+ * Stores information so that an already procesed message originating from one
  * source would not be processed more than once.
  * @{
  */
@@ -54,21 +54,16 @@
 void replay_cache_init(void);
 
 /**
- * Enable the replay protection cache module.
- */
-void replay_cache_enable(void);
-
-/**
  * Add an element to the replay protection cache.
  *
- * @param[in] src Source address.
+ * @param[in] src   Source address.
  * @param[in] seqno Message sequence number.
- * @param[in] iv_index IV index of the packet.
+ * @param[in] ivi   IV index bit.
  *
  * @retval NRF_SUCCESS      Successfully added element.
  * @retval NRF_ERROR_NO_MEM No more memory available in the cache.
  */
-uint32_t replay_cache_add(uint16_t src, uint32_t seqno, uint32_t iv_index);
+uint32_t replay_cache_add(uint16_t src, uint32_t seqno, uint8_t ivi);
 
 /**
  * Check if an element is in the cache.
@@ -78,14 +73,25 @@ uint32_t replay_cache_add(uint16_t src, uint32_t seqno, uint32_t iv_index);
  * valid since the packet has already passed network decryption, i.e., the IV
  * index is valid.
  *
- * @param[in] src Source address.
- * @param[in] seqno Message sequence number.
- * @param[in] iv_index IV index.
+ * @param[in] src         Source address.
+ * @param[in] seqno       Message sequence number.
+ * @param[in] ivi         IV index bit.
  *
  * @retval true  If the message exists in the cache.
  * @retval false Otherwise.
  */
-bool replay_cache_has_elem(uint16_t src, uint32_t seqno, uint32_t iv_index);
+bool replay_cache_has_elem(uint16_t src, uint32_t seqno, uint8_t ivi);
+
+/**
+ * Check if the replay cache can accept an entry from a given source address.
+ *
+ * @param[in] src         Source address.
+ * @param[in] ivi         IV index bit.
+ *
+ * @retval true  If there is room on the replay cache for the provided source address.
+ * @retval false Otherwise.
+ */
+bool replay_cache_has_room(uint16_t src, uint8_t ivi);
 
 /**
  * Function to call in IV update.

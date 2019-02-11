@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -97,18 +97,6 @@ typedef enum
  *  or the bootloader device page.
  */
 uint32_t nrf_mesh_dfu_init(void);
-
-/**
- * Enable the DFU module in the Bootloader.
- *
- * @note This function is called from nrf_mesh_enable()
- *
- * @retval NRF_SUCCESS The DFU app successfully sent a msg to bootloader to enable DFU.
- * @retval NRF_ERROR_NOT_SUPPORTED The dfu functionality is not available.
- * @retval NRF_ERROR_* The given command did not succeed. The meaning of each
- * error code depends on the command.
- */
-uint32_t nrf_mesh_dfu_enable(void);
 
 /**
 * Manually trigger the bootloader. The device will be reset immediately, and

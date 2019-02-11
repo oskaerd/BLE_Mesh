@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -39,9 +39,6 @@
 #define NRF_MESH_CONFIG_CORE_H__
 
 #include "nrf_mesh_defines.h"
-#ifdef CONFIG_APP_IN_CORE
-#include "nrf_mesh_config_app.h"
-#endif
 
 /**
  * @defgroup NRF_MESH_CONFIG_CORE Compile time configuration
@@ -54,7 +51,6 @@
  * @defgroup MESH_CONFIG_GENERAL General configuration
  * @{
  */
-
 
 /**
  * Enable persistent storage.
@@ -69,11 +65,6 @@
 #ifndef NRF_MESH_UECC_ENABLE
 #define NRF_MESH_UECC_ENABLE 1
 #endif
-
-/**
- * Switch on the time slotted flash manager as the back end subsystem.
- */
-#define FLASH_MANAGER_BACKEND
 
 /** @} end of MESH_CONFIG_GENERAL */
 
@@ -139,11 +130,6 @@
 #define CORE_TX_REPEAT_RELAY_DEFAULT 1
 #endif
 
-/** Relay feature */
-#ifndef MESH_FEATURE_RELAY_ENABLED
-#define MESH_FEATURE_RELAY_ENABLED (1)
-#endif
-
 /** @} end of MESH_CONFIG_CORE_TX */
 
 /**
@@ -184,7 +170,7 @@
  * is not set to @c Debug or @c RelWithDebInfo when configuring CMake.
  */
 #ifndef INTERNAL_EVT_ENABLE
-#define INTERNAL_EVT_ENABLE 0
+#define INTERNAL_EVT_ENABLE 1
 #endif
 
 /** Internal event buffer size. */
@@ -278,7 +264,7 @@
  * in a reduced lifetime for the flash hardware.
  */
 #ifndef NETWORK_SEQNUM_FLASH_BLOCK_SIZE
-#define NETWORK_SEQNUM_FLASH_BLOCK_SIZE 8192ul
+#define NETWORK_SEQNUM_FLASH_BLOCK_SIZE 8192
 #endif
 
 /**
@@ -302,11 +288,7 @@
  * @defgroup MESH_CONFIG_TRANSPORT Transport layer configuration
  * @{
  */
-/**
- * Maximum number of concurrent transport SAR sessions.
- *
- * One context is reserved for RX when @ref MESH_FEATURE_LPN_ENABLED is defined.
- */
+/** Maximum number of concurrent transport SAR sessions, shared by RX and TX. */
 #ifndef TRANSPORT_SAR_SESSIONS_MAX
 #define TRANSPORT_SAR_SESSIONS_MAX (4)
 #endif
@@ -324,11 +306,6 @@
 /** @} end of MESH_CONFIG_TRANSPORT */
 /**
  * @defgroup MESH_CONFIG_PACMAN Packet manager configuration
- *
- * @note These configuration parameters are only relevant when the `mesh_mem_packet_mgr.c` is used
- * as the dynamic memory backend. The default is the `mesh_mem_stdlib.c` backend. Its memory pool
- * size is directly controlled by the heap size.
- *
  * @{
  */
 
@@ -394,19 +371,11 @@
 /**
  * Number of entries in the replay protection cache.
  *
- * @note The number of entries in the replay protection list directly limits the number of elements
- * a node can receive messages from on the current IV index. This means if your device has a replay
- * protection list with 40 entries, a message from a 41st unicast address (element )will be dropped
- * by the transport layer.
- *
- * @note The replay protection list size *does not* affect the node's ability to relay messages.
- *
- * @note This number is indicated in the device composition data of the node and provisioner can
- * make use of this information to prevent unwarranted filling of the replay list on a given node in
- * a mesh network.
+ * @note Note that the number of entries in the replay cache directly limits the
+ * number of peer nodes one can receive messages from for the current IV index.
  */
 #ifndef REPLAY_CACHE_ENTRIES
-#define REPLAY_CACHE_ENTRIES 40
+#define REPLAY_CACHE_ENTRIES 32
 #endif
 
 /** @} end of MESH_CONFIG_REPLAY_CACHE */
@@ -431,116 +400,7 @@
 #define FLASH_MANAGER_ENTRY_MAX_SIZE 128
 #endif
 
-/** Number of flash pages to be reserved between the flash manager recovery page and the bootloader.
- *  @note This value will be ignored if FLASH_MANAGER_RECOVERY_PAGE is set.
- */
-#ifndef FLASH_MANAGER_RECOVERY_PAGE_OFFSET_PAGES
-#define FLASH_MANAGER_RECOVERY_PAGE_OFFSET_PAGES 0
-#endif
-
 /** @} end of MESH_CONFIG_FLASH_MANAGER */
-
-/**
- * @defgroup MESH_CONFIG_GATT GATT configuration defines
- * @{
- */
-
-/** GATT proxy feature. To be enabled only in combination with linking GATT proxy files. */
-#ifndef MESH_FEATURE_GATT_PROXY_ENABLED
-#define MESH_FEATURE_GATT_PROXY_ENABLED 0
-#endif
-
-/** Maximum number of addresses in the GATT proxy address filter, per connection. */
-#ifndef MESH_GATT_PROXY_FILTER_ADDR_COUNT
-#define MESH_GATT_PROXY_FILTER_ADDR_COUNT 32
-#endif
-
-/**
- * Advertisement interval for Mesh GATT Proxy Network ID advertisements.
- */
-#ifndef MESH_GATT_PROXY_NETWORK_ID_ADV_INT_MS
-#define MESH_GATT_PROXY_NETWORK_ID_ADV_INT_MS 2000
-#endif
-
-/**
- * Advertisement interval for Mesh GATT Proxy Node Identity advertisements.
- *
- * The Node Identity beacon is used by the Provisioner to identify a specific node with Proxy
- * support. The beacon is automatically advertised after the node has been provisioned,
- * if the node supports the Proxy feature.
- */
-#ifndef MESH_GATT_PROXY_NODE_IDENTITY_ADV_INT_MS
-#define MESH_GATT_PROXY_NODE_IDENTITY_ADV_INT_MS 200
-#endif
-
-/**
- * Duration of the Mesh GATT Proxy Node Identity advertisements.
- *
- * @note The duration of the Node Identity advertisements shall not be greater than 60.
- * See the requirement in the Mesh Profile specification v1.0, section 7.2.2.2.3.
- */
-#ifndef MESH_GATT_PROXY_NODE_IDENTITY_DURATION_MS
-#define MESH_GATT_PROXY_NODE_IDENTITY_DURATION_MS 60000
-#endif
-
-/** Number of network beacons to cache in proxy to limit impact on GATT link bandwidth */
-#ifndef MESH_GATT_PROXY_BEACON_CACHE_SIZE
-#define MESH_GATT_PROXY_BEACON_CACHE_SIZE 8
-#endif
-/** @} end of MESH_CONFIG_GATT */
-
-/**
- * @defgroup MESH_CONFIG_ACCESS Access layer configuration defines
- * @{
- */
-
-/** Model publish period restore behavior
- *
- * If publish period setting is restored, model will start periodic publishing automatically if
- * it was configured to do so before power down.
- * Note: If node is configured to restore publish period settings on power-up, and if provisioner
- * malfunctions after setting up the publish period state or user looses access to the provisioner,
- * then there is no way to stop periodic publishing other than manually initiated node reset.
- */
-#ifndef ACCESS_MODEL_PUBLISH_PERIOD_RESTORE
-#define ACCESS_MODEL_PUBLISH_PERIOD_RESTORE 0
-#endif
-
-
-/** @} end of MESH_CONFIG_ACCESS */
-
-/**
- * @defgroup MESH_CONFIG_FSM Finite State Machine configuration
- * @{
- */
-
-/** Set to 1 to enable debug mode for the Finite State Machine. */
-#ifndef FSM_DEBUG
-#define FSM_DEBUG (0)
-#endif
-
-/** @} end of MESH_CONFIG_FSM */
-
-/**
- * @defgroup MESH_CONFIG_FRIENDSHIP Friendship configuration defines
- * @{
- */
-
-/** LPN feature */
-#ifndef MESH_FEATURE_LPN_ENABLED
-#define MESH_FEATURE_LPN_ENABLED 0
-#endif
-
-/**
- * Number of friendship credentials to be supported by the mesh stack.
- *
- * @note Shall be set to 1 if LPN feature is enabled
- */
-#ifndef MESH_FRIENDSHIP_CREDENTIALS
-#define MESH_FRIENDSHIP_CREDENTIALS 1
-#endif
-
-/** @} end of MESH_CONFIG_FRIENDSHIP */
 
 /** @} end of NRF_MESH_CONFIG_CORE */
 

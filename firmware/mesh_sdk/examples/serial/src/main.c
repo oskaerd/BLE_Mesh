@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -35,76 +35,64 @@
  * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "nrf_delay.h"
-#include "boards.h"
+#include <stdbool.h>
+#include <stdint.h>
+
+#include "ble.h"
+
 #include "log.h"
+#include "nrf_mesh.h"
+#include "nrf_mesh_opt.h"
+#include "utils.h"
+
+#include "access.h"
+#include "device_state_manager.h"
 #include "nrf_mesh_serial.h"
-#include "mesh_app_utils.h"
-#include "simple_hal.h"
-#include "mesh_stack.h"
-#include "ble_softdevice_support.h"
-#include "nrf_mesh_config_examples.h"
-#include "mesh_opt_prov.h"
-#include "app_timer.h"
-#include "example_common.h"
-#include "nrf_mesh_configure.h"
+#include "nrf_mesh_sdk.h"
+#include "nrf_delay.h"
+#include "nrf_gpio.h"
+#include "boards.h"
 
-static bool m_device_provisioned;
+/********** Application Functionality **********/
 
-static void mesh_init(void)
-{
-    mesh_stack_init_params_t init_params =
-    {
-        .core.irq_priority = NRF_MESH_IRQ_PRIORITY_LOWEST,
-        .core.lfclksrc     = DEV_BOARD_LF_CLK_CFG
-    };
-    ERROR_CHECK(mesh_stack_init(&init_params, &m_device_provisioned));
-
-    __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Enabling ECDH offloading...\n");
-    ERROR_CHECK(mesh_opt_prov_ecdh_offloading_set(true));
-
-    __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Initializing serial interface...\n");
-    ERROR_CHECK(nrf_mesh_serial_init(NULL));
-}
-
-static void initialize(void)
+int main(void)
 {
 #if defined(NRF51) && defined(NRF_MESH_STACK_DEPTH)
     stack_depth_paint_stack();
 #endif
 
+
     __LOG_INIT(LOG_MSK_DEFAULT | LOG_SRC_ACCESS | LOG_SRC_SERIAL | LOG_SRC_APP, LOG_LEVEL_INFO, log_callback_rtt);
     __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "----- Bluetooth Mesh Serial Interface Application -----\n");
 
-    ERROR_CHECK(app_timer_init());
-    hal_leds_init();
+    NRF_GPIO->DIRSET = 0xFFFFFFFF;
+    NRF_GPIO->OUT    = LEDS_MASK;
 
-    ble_stack_init();
+    /* Flash leds at boot */
+    for (int i = 0; i < 10; ++i)
+    {
+        NRF_GPIO->OUT ^= BSP_LED_0_MASK;
+        nrf_delay_ms(100);
+    }
 
-    mesh_init();
+    mesh_core_setup();
 
-    __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Initialization complete!\n");
-}
+    /* Initialize dsm and access */
+    dsm_init();
+    access_init();
 
-static void start(void)
-{
+    __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Enabling ECDH offloading...\n");
+    nrf_mesh_opt_t value = {.len = 4, .opt.val = 1 };
+    ERROR_CHECK(nrf_mesh_opt_set(NRF_MESH_OPT_PROV_ECDH_OFFLOADING, &value));
+
+    __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Enabling serial interface...\n");
+    ERROR_CHECK(nrf_mesh_serial_init(NULL));
     ERROR_CHECK(nrf_mesh_serial_enable());
 
-    mesh_app_uuid_print(nrf_mesh_configure_device_uuid_get());
+    __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Initialization complete!\n");
+    NRF_GPIO->OUTCLR = BSP_LED_0_MASK;
 
-    ERROR_CHECK(mesh_stack_start());
-
-    __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Bluetooth Mesh Serial Interface Application started!\n");
-}
-
-int main(void)
-{
-    initialize();
-    start();
-    hal_led_mask_set(LEDS_MASK, LED_MASK_STATE_OFF);
-    hal_led_blink_ms(LEDS_MASK, LED_BLINK_INTERVAL_MS, LED_BLINK_CNT_START);
-
-    for (;;)
+    while (true)
     {
         (void)sd_app_evt_wait();
     }

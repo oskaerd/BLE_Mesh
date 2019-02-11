@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -57,6 +57,8 @@
 
 #define RADIO_CONFIG_LOGICAL_ADDRS    8
 
+#define RADIO_RAMPUP_TIME   (140)
+
 #define RADIO_CONFIG_CRC_LEN 3
 
 #if defined(NRF52_SERIES)
@@ -68,11 +70,6 @@
 
     #define PREAMBLE_LEN(MODE) (((MODE) == RADIO_MODE_BLE_2MBIT) ? 2 : 1)
     #define RADIO_TIME_PER_BYTE(MODE) (((MODE) == RADIO_MODE_NRF_2MBIT || (MODE) == RADIO_MODE_BLE_2MBIT) ? 4 : 8)
-
-    #define RADIO_RAMPUP_TIME   (40)
-
-    #define PREAMBLE_LEN(MODE) (((MODE) == RADIO_MODE_BLE_2MBIT) ? 2 : 1)
-
 #elif defined(NRF51)
     /**
      * Maximum packet length supported by the radio
@@ -82,12 +79,13 @@
 
     #define RADIO_TIME_PER_BYTE(MODE) (((MODE) == RADIO_MODE_NRF_2MBIT) ? 4 : 8)
     #define PREAMBLE_LEN(MODE) (1)
-
-    #define RADIO_RAMPUP_TIME   (132)
-
-    #define PREAMBLE_LEN(MODE) (1)
 #endif
 
+#ifdef NRF52_SERIES
+#define PREAMBLE_LEN(MODE) (((MODE) == RADIO_MODE_BLE_2MBIT) ? 2 : 1)
+#elif defined(NRF51)
+#define PREAMBLE_LEN(MODE) (1)
+#endif
 #define ACCESS_ADDR_LEN     (4)
 
 #define BLE_PACKET_OVERHEAD(MODE) (PREAMBLE_LEN(MODE) + ACCESS_ADDR_LEN + BLE_ADV_PACKET_HEADER_LENGTH + RADIO_CONFIG_CRC_LEN)
@@ -117,18 +115,9 @@ typedef enum
  */
 typedef enum
 {
-#ifdef NRF52840_XXAA
-    RADIO_POWER_NRF_POS8DBM  = 0x08,
-    RADIO_POWER_NRF_POS7DBM  = 0x07,
-    RADIO_POWER_NRF_POS6DBM  = 0x06,
-    RADIO_POWER_NRF_POS5DBM  = 0x05,
-#endif
     RADIO_POWER_NRF_POS4DBM  = 0x04,
 #ifdef NRF52_SERIES
     RADIO_POWER_NRF_POS3DBM  = 0x03,
-#endif
-#ifdef NRF52840_XXAA
-    RADIO_POWER_NRF_POS2DBM  = 0x02,
 #endif
     RADIO_POWER_NRF_0DBM     = 0x00,
     RADIO_POWER_NRF_NEG4DBM  = 0xFC,
@@ -154,7 +143,7 @@ typedef enum
 typedef struct
 {
     radio_tx_power_t tx_power;       /*!< Transmit power of the radio */
-    uint16_t         payload_maxlen; /*!<Maximum length of radio packet payload see @ref RADIO_MAX_PACKET_LEN*/
+    uint8_t          payload_maxlen; /*!<Maximum length of radio packet payload see @ref RADIO_MAX_PACKET_LEN*/
     radio_mode_t     radio_mode;     /*!< Data rate and modulation */
 } radio_config_t;
 

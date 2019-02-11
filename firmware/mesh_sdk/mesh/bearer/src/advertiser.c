@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -55,7 +55,9 @@ static prng_t m_adv_prng;
 static inline bool is_active(const advertiser_t * p_adv)
 {
     /* Any state that will lead to the timer firing is considered active. */
-    return (p_adv->timer.state != TIMER_EVENT_STATE_UNUSED);
+    return (p_adv->timer.state != TIMER_EVENT_STATE_UNUSED &&
+            p_adv->timer.state != TIMER_EVENT_STATE_ABORTED &&
+            p_adv->timer.state != TIMER_EVENT_STATE_IGNORED);
 }
 
 static inline packet_buffer_packet_t * get_packet_buffer_from_adv_packet(adv_packet_t * p_packet)
@@ -70,7 +72,7 @@ static inline bool is_tx_complete_event_pending(advertiser_t * p_adv)
 }
 
 /* This is in highest priority: Called by radio_irq_handler in broadcast.c */
-static void broadcast_complete_cb(broadcast_params_t * p_broadcast, timestamp_t timestamp)
+static void broadcast_complete_cb(broadcast_params_t * p_broadcast, uint32_t timestamp)
 {
     /* Find the owner of this broadcast */
     advertiser_t * p_adv = PARENT_BY_FIELD_GET(advertiser_t, broadcast.params, p_broadcast);
@@ -90,6 +92,10 @@ static void broadcast_complete_cb(broadcast_params_t * p_broadcast, timestamp_t 
         packet_buffer_packet_t * p_buf_packet = get_packet_buffer_from_adv_packet(p_adv->p_packet);
         p_adv->p_packet = NULL;
         packet_buffer_free(&p_adv->buf, p_buf_packet);
+        if (!packet_buffer_can_pop(&p_adv->buf))
+        {
+            timer_sch_abort(&p_adv->timer);
+        }
     }
 }
 
@@ -201,7 +207,6 @@ static void schedule_broadcast(advertiser_t * p_adv)
 static void timeout_event(timestamp_t timestamp, void * p_context)
 {
     advertiser_t * p_adv = (advertiser_t *) p_context;
-    p_adv->timer.interval = 0;
 
     if (p_adv->enabled)
     {
@@ -227,6 +232,10 @@ static void timeout_event(timestamp_t timestamp, void * p_context)
         {
             setup_next_timeout(&p_adv->timer, p_adv->config.advertisement_interval_us);
         }
+    }
+    else
+    {
+        p_adv->timer.interval = 0;
     }
 }
 
@@ -273,7 +282,7 @@ static inline void set_adv_address(advertiser_t * p_adv, packet_t * p_packet)
 static void tx_complete_event_callback(void * p_context)
 {
     advertiser_t * p_adv = (advertiser_t *)p_context;
-
+    
     NRF_MESH_ASSERT(p_adv != NULL);
     NRF_MESH_ASSERT(p_adv->tx_complete_callback != NULL);
     p_adv->tx_complete_callback(p_adv, p_adv->tx_complete_params.token, p_adv->tx_complete_params.timestamp);
@@ -343,7 +352,7 @@ adv_packet_t * advertiser_packet_alloc(advertiser_t * p_adv, uint32_t adv_payloa
         packet_payload_size_set(&p_adv_packet->packet, adv_payload_size);
         p_adv_packet->packet.header.type = BLE_PACKET_TYPE_ADV_NONCONN_IND;
         set_adv_address(p_adv, &p_adv_packet->packet);
-        p_adv_packet->token = NRF_MESH_INITIAL_TOKEN;
+        p_adv_packet->token = 0;
         return p_adv_packet;
     }
     else
@@ -434,12 +443,6 @@ void advertiser_config_get(const advertiser_t * p_adv, advertiser_config_t * p_c
 {
     NRF_MESH_ASSERT(p_config != NULL && NULL != p_adv);
     memcpy(p_config, &p_adv->config, sizeof(advertiser_config_t));
-}
-
-void advertiser_tx_power_set(advertiser_t * p_adv, radio_tx_power_t tx_power)
-{
-    NRF_MESH_ASSERT(NULL != p_adv);
-    p_adv->broadcast.params.radio_config.tx_power = tx_power;
 }
 
 void advertiser_flush(advertiser_t * p_adv)

@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -71,8 +71,8 @@ NRF_MESH_STATIC_ASSERT(NRF_MESH_DFU_ROLE__LAST      <= UINT8_MAX);
 #define DFU_TX_DELAY_RANDOMIZATION_MASK_US  (0xFFFF)    /**< Maximum variation in TX time offsets. */
 #define DFU_TX_TIMER_MARGIN_US              (1000)      /**< Time margin for a timeout to be considered instant. */
 
-#define TIMER_START_TIMEOUT_US              (600000000)  /**< Time to wait for first data during a transfer. */
-#define TIMER_DATA_TIMEOUT_US               (600000000)  /**< Time to wait for next data during a transfer. */
+#define TIMER_START_TIMEOUT_US              (50000000)  /**< Time to wait for first data during a transfer. */
+#define TIMER_DATA_TIMEOUT_US               (10000000)  /**< Time to wait for next data during a transfer. */
 /*****************************************************************************
 * Local typedefs
 *****************************************************************************/
@@ -705,20 +705,17 @@ uint32_t nrf_mesh_dfu_init(void)
 
     mp_curr_fwid = &fwid_cmd.params.info.get.p_entry->version;
 
-    mesh_flash_user_callback_set(MESH_FLASH_USER_DFU, flash_op_complete);
-
-    m_transfer_state.state = NRF_MESH_DFU_STATE_INITIALIZED;
-    return error_code;
-}
-
-uint32_t nrf_mesh_dfu_enable(void)
-{
     bl_cmd_t enable_cmd =
     {
         .type = BL_CMD_TYPE_ENABLE,
         .params = {{0}}
     };
-    return nrf_mesh_dfu_cmd_send(&enable_cmd);
+    error_code = nrf_mesh_dfu_cmd_send(&enable_cmd);
+
+    mesh_flash_user_callback_set(MESH_FLASH_USER_DFU, flash_op_complete);
+
+    m_transfer_state.state = NRF_MESH_DFU_STATE_INITIALIZED;
+    return error_code;
 }
 
 uint32_t nrf_mesh_dfu_jump_to_bootloader(void)

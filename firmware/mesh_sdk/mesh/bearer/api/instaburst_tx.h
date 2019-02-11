@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -86,10 +86,8 @@ typedef struct instaburst_tx instaburst_tx_t;
  *
  * @param[in,out] p_tx Instaburst instance the buffer was allocated to.
  * @param[in] tx_token Token passed to the alloc call for this buffer.
- * @param[in] timestamp Timestamp of the first bit of the packet header of the last packet in the
- * chain (in device time).
  */
-typedef void (*instaburst_tx_complete_t)(struct instaburst_tx * p_tx, nrf_mesh_tx_token_t tx_token, timestamp_t timestamp);
+typedef void (*instaburst_tx_complete_t)(struct instaburst_tx * p_tx, nrf_mesh_tx_token_t tx_token, uint32_t timestamp);
 
 /** Instaburst TX configuration. Passed to the @ref instaburst_tx_instance_init function to
  * configure an Instaburst TX instance. */
@@ -149,7 +147,7 @@ struct instaburst_tx
     adv_ext_tx_t adv_ext_tx;
 
     bearer_event_sequential_t tx_complete_event;
-    timestamp_t prev_tx_timestamp;
+    uint32_t prev_tx_timestamp;
 
     timer_event_t timer_event;
 
@@ -191,15 +189,6 @@ void instaburst_tx_enable(instaburst_tx_t * p_instaburst);
  * @param[in,out] p_instaburst Instance to disable.
  */
 void instaburst_tx_disable(instaburst_tx_t * p_instaburst);
-
-/**
- * Checks if the Instaburst instance is enabled.
- *
- * @param[in] p_instaburst Instaburst instance pointer.
- *
- * @returns @c true if the Instaburst instance is enabled (scheduled), @c false otherwise.
- */
-bool instaburst_tx_is_enabled(const instaburst_tx_t * p_instaburst);
 
 /**
  * Allocates a buffer for transmission.
@@ -268,38 +257,6 @@ void instaburst_tx_buffer_lock(bool lock);
  * BEARER_ADV_INT_MIN_MS and @ref BEARER_ADV_INT_MAX_MS.
  */
 void instaburst_tx_interval_set(instaburst_tx_t * p_instaburst, uint32_t interval_ms);
-
-/**
- * Gets the TX interval for the given Instaburst instance.
- *
- * @param[in] p_instaburst Instaburst instance pointer.
- *
- * @returns the current TX interval in milliseconds.
- */
-static inline uint32_t instaburst_tx_interval_get(const instaburst_tx_t * p_instaburst)
-{
-    return p_instaburst->config.interval_ms;
-}
-
-/**
- * Sets the TX power for the given Instaburst instance.
- *
- * @param[in,out] p_instaburst Instaburst instance to configure.
- * @param[in] tx_power New TX power.
- */
-void instaburst_tx_tx_power_set(instaburst_tx_t * p_instaburst, radio_tx_power_t tx_power);
-
-/**
- * Gets the TX power for the given Instaburst instance.
- *
- * @param[in] p_instaburst Instaburst instance pointer.
- *
- * @returns the current TX power.
- */
-static inline radio_tx_power_t instaburst_tx_tx_power_get(const instaburst_tx_t * p_instaburst)
-{
-    return p_instaburst->config.tx_power;
-}
 
 /** @} */
 

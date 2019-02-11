@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -44,10 +44,18 @@
 #include "nrf.h"
 #include "nrf_mesh_serial.h"
 #include "nrf_mesh_assert.h"
-#include "nrf_mesh_defines.h"
-#include "nrf_gpio.h"
 
-#define UART_IRQ_LEVEL NRF_MESH_IRQ_PRIORITY_LOWEST
+
+#if defined(NRF51)
+/** UART IRQ level defaults to correspond with `APP_IRQ_PRIORITY_LOW` */
+#define UART_IRQ_LEVEL (3)
+#elif defined(NRF52_SERIES)
+/** UART IRQ level defaults to correspond with `APP_IRQ_PRIORITY_LOW` */
+#define UART_IRQ_LEVEL (6)
+#else
+#error "Unsupported platform"
+#endif
+
 
 /********** Static variables **********/
 static bool m_can_receive;
@@ -73,11 +81,14 @@ uint32_t serial_uart_init(serial_uart_rx_cb_t rx_cb, serial_uart_tx_cb_t tx_cb)
     m_char_tx_cb = tx_cb;
 
     /* Set up GPIOs: */
-    nrf_gpio_cfg_input(RX_PIN_NUMBER, NRF_GPIO_PIN_PULLUP);
-    nrf_gpio_cfg_input(CTS_PIN_NUMBER, NRF_GPIO_PIN_PULLUP);
-    nrf_gpio_cfg_output(TX_PIN_NUMBER);
-    nrf_gpio_pin_set(TX_PIN_NUMBER);
-    nrf_gpio_cfg_output(RTS_PIN_NUMBER);
+    NRF_GPIO->DIRCLR = (1 << RX_PIN_NUMBER);
+    NRF_GPIO->DIRCLR = (1 << CTS_PIN_NUMBER);
+    NRF_GPIO->PIN_CNF[RX_PIN_NUMBER] = GPIO_PIN_CNF_PULL_Msk;
+    NRF_GPIO->PIN_CNF[CTS_PIN_NUMBER] = GPIO_PIN_CNF_PULL_Msk;
+
+    NRF_GPIO->OUTSET = (1 << TX_PIN_NUMBER);
+    NRF_GPIO->DIRSET = (1 << TX_PIN_NUMBER);
+    NRF_GPIO->DIRSET = (1 << RTS_PIN_NUMBER);
 
     /* Initialize UART hardware: */
     NRF_UART0->PSELTXD = TX_PIN_NUMBER;

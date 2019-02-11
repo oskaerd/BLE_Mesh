@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -41,6 +41,7 @@
 
 #include "timer.h"
 #include "timer_scheduler.h"
+#include "nrf_mesh.h"
 #include "nrf_mesh_config_core.h"
 #include "queue.h"
 
@@ -79,13 +80,6 @@ typedef struct
 void bearer_event_init(uint8_t irq_priority);
 
 /**
- * Start the bearer event module.
- *
- * @note Enables bearer event IRQ if IRQ priority level is not NRF_MESH_IRQ_PRIORITY_THREAD.
- */
-void bearer_event_start(void);
-
-/**
  * Post generic event for asynchronous processing.
  * @param[in] callback Callback function to call.
  * @param[in] p_context Pointer to a context variable to be passed to the callback.
@@ -94,6 +88,16 @@ void bearer_event_start(void);
  * @retval NRF_ERROR_NO_MEM The event fifo was full, and the event will not be processed.
  */
 uint32_t bearer_event_generic_post(bearer_event_callback_t callback, void* p_context);
+
+/**
+ * Post timer type event for asynchronous processing.
+ * @param[in] callback Callback function to call.
+ * @param[in] timestamp Expiration timestamp to give to callback function.
+ *
+ * @retval NRF_SUCCESS The event was successfully posted for processing.
+ * @retval NRF_ERROR_NO_MEM The event fifo was full, and the event will not be processed.
+ */
+uint32_t bearer_event_timer_post(timer_callback_t callback, timestamp_t timestamp);
 
 /**
  * Post timer scheduler type event for asynchronous processing.

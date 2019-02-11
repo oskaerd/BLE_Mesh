@@ -36,8 +36,6 @@ Event                                                                    | Opcod
 [Prov Link Established](#prov-link-established)                          | 0xc1
 [Prov Link Closed](#prov-link-closed)                                    | 0xc2
 [Prov Caps Received](#prov-caps-received)                                | 0xc3
-[Prov Invite Received](#prov-invite-received)                            | 0xc4
-[Prov Start Received](#prov-start-received)                              | 0xca
 [Prov Complete](#prov-complete)                                          | 0xc5
 [Prov Auth Request](#prov-auth-request)                                  | 0xc6
 [Prov ECDH Request](#prov-ecdh-request)                                  | 0xc7
@@ -57,7 +55,7 @@ Event                                                                    | Opcod
 
 _Opcode:_ `0x84`
 
-_Total length: 3..255 bytes_
+_Total length: 3..97 bytes_
 
 Command response. Each command (except the Echo command) immediately gets a command response. See the individual commands for their responses.
 
@@ -67,7 +65,7 @@ Type              | Name                                    | Size  | Offset | D
 ------------------|-----------------------------------------|-------|--------|------------
 `uint8_t`         | Opcode                                  | 1     | 0      | Opcode of original command.
 `uint8_t`         | Status                                  | 1     | 1      | Return status of the serial command.
-`uint8_t[252]`    | Data                                    | 0..252 | 2      | Optional command response data.
+`uint8_t[94]`     | Data                                    | 0..94 | 2      | Optional command response data.
 
 ### Device Started          {#device-started}
 
@@ -82,14 +80,14 @@ _Device Started Parameters_
 Type              | Name                                    | Size  | Offset | Description
 ------------------|-----------------------------------------|-------|--------|------------
 `uint8_t`         | Operating Mode                          | 1     | 0      | Operating mode of the device. see @ref serial_device_operating_mode_t for accepted values.
-`uint8_t`         | Hw Error                                | 1     | 1      | Hardware error code, or 0 if no error occurred.
+`uint8_t`         | Hw Error                                | 1     | 1      | Hardware error code, or 0 if no error occured.
 `uint8_t`         | Data Credit Available                   | 1     | 2      | The number of bytes available in each of the tx and rx buffers.
 
 ### Device Echo Rsp          {#device-echo-rsp}
 
 _Opcode:_ `0x82`
 
-_Total length: 1..255 bytes_
+_Total length: 1..98 bytes_
 
 Response to the Echo command. Contains the exact same data as received in the echo command.
 
@@ -97,7 +95,7 @@ _Device Echo Rsp Parameters_
 
 Type              | Name                                    | Size  | Offset | Description
 ------------------|-----------------------------------------|-------|--------|------------
-`uint8_t[254]`    | Data                                    | 0..254 | 0      | Data received in the echo command.
+`uint8_t[97]`     | Data                                    | 0..97 | 0      | Data received in the echo command.
 
 ### Device Internal Event          {#device-internal-event}
 
@@ -120,7 +118,7 @@ Type              | Name                                    | Size  | Offset | D
 
 _Opcode:_ `0x8a`
 
-_Total length: 1..255 bytes_
+_Total length: 1..98 bytes_
 
 Application event, only sent by the device application.
 
@@ -128,7 +126,7 @@ _Application Parameters_
 
 Type              | Name                                    | Size  | Offset | Description
 ------------------|-----------------------------------------|-------|--------|------------
-`uint8_t[254]`    | Data                                    | 0..254 | 0      | Application data.
+`uint8_t[97]`     | Data                                    | 0..97 | 0      | Application data.
 
 ### SAR Start          {#sar-start}
 
@@ -371,35 +369,6 @@ Type              | Name                                    | Size  | Offset | D
 `uint8_t`         | Input OOB Size                          | 1     | 7      | Maximum size of the input OOB supported.
 `uint16_t`        | Input OOB Actions                       | 2     | 8      | Available OOB input actions.
 
-### Prov Invite Received          {#prov-invite-received}
-
-_Opcode:_ `0xc4`
-
-_Total length: 3 bytes_
-
-The device received provisioning invite so it can start identifying itself using anymeans it can.
-
-_Prov Invite Received Parameters_
-
-Type              | Name                                    | Size  | Offset | Description
-------------------|-----------------------------------------|-------|--------|------------
-`uint8_t`         | Context ID                              | 1     | 0      | Context ID of the provisioning link.
-`uint8_t`         | Attention Duration S                    | 1     | 1      | Time in seconds during which the device will identify itself using any means it can.
-
-### Prov Start Received          {#prov-start-received}
-
-_Opcode:_ `0xca`
-
-_Total length: 2 bytes_
-
-The device received provisioning start meaning that the provisioning process has been started and shall stop identifying itself.
-
-_Prov Start Received Parameters_
-
-Type              | Name                                    | Size  | Offset | Description
-------------------|-----------------------------------------|-------|--------|------------
-`uint8_t`         | Context ID                              | 1     | 0      | Context ID of the provisioning link.
-
 ### Prov Complete          {#prov-complete}
 
 _Opcode:_ `0xc5`
@@ -489,7 +458,7 @@ Type              | Name                                    | Size  | Offset | D
 
 _Opcode:_ `0xd0`
 
-_Total length: 20..255 bytes_
+_Total length: 20..98 bytes_
 
 The mesh framework received a message matching a registered local unicast address, with the given parameters and data.
 
@@ -506,13 +475,13 @@ Type              | Name                                    | Size  | Offset | D
 `uint8_t[6]`      | Adv Addr                                | 6     | 10     | Advertisement address of the last hop sender.
 `int8_t`          | Rssi                                    | 1     | 16     | RSSI value of the message when received.
 `uint16_t`        | Actual Length                           | 2     | 17     | Length of the received message, may be larger than the data reported if @ref SERIAL_EVT_MESH_MESSAGE_RECEIVED_DATA_MAXLEN is not big enough.
-`uint8_t[235]`    | Data                                    | 0..235 | 19     | Data payload of the packet.
+`uint8_t[78]`     | Data                                    | 0..78 | 19     | Data payload of the packet.
 
 ### Mesh Message Received Subscription          {#mesh-message-received-subscription}
 
 _Opcode:_ `0xd1`
 
-_Total length: 20..255 bytes_
+_Total length: 20..98 bytes_
 
 The mesh framework received a message matching one of the registered subscription addresses, with the given parameters and data.
 
@@ -529,21 +498,17 @@ Type              | Name                                    | Size  | Offset | D
 `uint8_t[6]`      | Adv Addr                                | 6     | 10     | Advertisement address of the last hop sender.
 `int8_t`          | Rssi                                    | 1     | 16     | RSSI value of the message when received.
 `uint16_t`        | Actual Length                           | 2     | 17     | Length of the received message, may be larger than the data reported if @ref SERIAL_EVT_MESH_MESSAGE_RECEIVED_DATA_MAXLEN is not big enough.
-`uint8_t[235]`    | Data                                    | 0..235 | 19     | Data payload of the packet.
+`uint8_t[78]`     | Data                                    | 0..78 | 19     | Data payload of the packet.
 
 ### Mesh TX Complete          {#mesh-tx-complete}
 
 _Opcode:_ `0xd2`
 
-_Total length: 5 bytes_
+_Total length: 1 byte_
 
 A radio packet TX has completed.
 
-_Mesh TX Complete Parameters_
-
-Type              | Name                                    | Size  | Offset | Description
-------------------|-----------------------------------------|-------|--------|------------
-`nrf_mesh_tx_token_t` | Token                                   | 4     | 0      | TX token for the completed packet.
+_Mesh TX Complete has no parameters._
 
 ### Mesh IV Update Notification          {#mesh-iv-update-notification}
 
@@ -588,7 +553,7 @@ _Mesh SAR Failed has no parameters._
 
 _Opcode:_ `0xf0`
 
-_Total length: 6..255 bytes_
+_Total length: 6..98 bytes_
 
 An event generated by one of the initialized models. Model id and event type is provided by each event, further model specific information is provided as part of the data field.
 
@@ -597,5 +562,5 @@ _Model Specific Parameters_
 Type              | Name                                    | Size  | Offset | Description
 ------------------|-----------------------------------------|-------|--------|------------
 `serial_evt_model_specific_header_t` | Model Evt Info                          | 5     | 0      | Contains the model id the event generates from and the model specific event type.
-`uint8_t[249]`    | Data                                    | 0..249 | 5      | Additional data provided by the event
+`uint8_t[92]`     | Data                                    | 0..92 | 5      | Additional data provided by the event
 

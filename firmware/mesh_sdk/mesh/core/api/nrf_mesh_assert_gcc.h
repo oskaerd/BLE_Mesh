@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -66,13 +66,13 @@
 #else
 
     /** Produces a hardfault. */
-    #define HARD_FAULT()  __asm__ volatile(".inst.n 0xde00\n")
+    #define HARD_FAULT()  asm volatile(".inst.n 0xde00\n")
 
     /**
      * Gets the current value of the program counter.
      * @param[out] pc Variable to assign the obtained value to.
      */
-    #define GET_PC(pc)    __asm__ volatile("mov %0, pc\n\t" : "=r" (pc))
+    #define GET_PC(pc)    asm volatile("mov %0, pc\n\t" : "=r" (pc))
 
 #endif
 

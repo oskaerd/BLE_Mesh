@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -52,14 +52,11 @@
 #include "nrf_mesh_assert.h"
 #include "nrf_mesh_config_core.h"
 #include "nrf_mesh_defines.h"
-#include "packet_mesh.h"
 
 #include "timer.h"
 #include "timer_scheduler.h"
 #include "bearer_event.h"
 #include "bearer_defines.h"
-
-#include "log.h"
 
 /* ******************* Definitions ******************* */
 
@@ -69,12 +66,10 @@
 typedef struct
 {
     access_reliable_t params;
-    timestamp_t next_timeout;
+    uint32_t next_timeout;
     uint32_t interval;
     bool in_use;
 } access_reliable_ctx_t;
-
-static uint32_t calculate_interval(const access_reliable_t * p_message);
 
 /* ******************* Static asserts ******************* */
 
@@ -119,27 +114,17 @@ static void reliable_timer_cb(timestamp_t timestamp, void * p_context)
         }
         else if (TIMER_OLDER_THAN(m_reliable.pool[i].next_timeout, timestamp))
         {
-            m_reliable.next_timeout_index = i;
-
             uint32_t status = access_model_publish(m_reliable.pool[i].params.model_handle, &m_reliable.pool[i].params.message);
-
-            if (status != NRF_SUCCESS)
-            {
-                __LOG(LOG_SRC_ACCESS, LOG_LEVEL_DBG1, "[er%d] <= access_model_publish()\n", status);
-            }
-
-            if (NRF_SUCCESS == status ||
-                NRF_ERROR_INVALID_STATE == status)
+            m_reliable.next_timeout_index = i;
+            if (NRF_SUCCESS == status)
             {
                 m_reliable.pool[i].next_timeout += m_reliable.pool[i].interval;
                 m_reliable.pool[i].interval *= ACCESS_RELIABLE_BACK_OFF_FACTOR;
             }
-            else if (NRF_ERROR_NO_MEM == status ||
-                     NRF_ERROR_FORBIDDEN == status)
+            else if (NRF_ERROR_NO_MEM == status)
             {
-                /* If there is no more memory available (NRF_ERROR_NO_MEM) or we cannot allocate
-                 * sequence numbers right now (NRF_ERROR_FORBIDDEN), we might as well cancel the
-                 * rest and set the timer to fire in ACCESS_RELIABLE_RETRY_DELAY. */
+                /* If there is no more memory available, we might as well cancel the rest and set
+                 * the timer to fire in ACCESS_RELIABLE_RETRY_DELAY. */
                 m_reliable.pool[i].next_timeout += ACCESS_RELIABLE_RETRY_DELAY;
                 break;
             }
@@ -262,10 +247,9 @@ static uint32_t calculate_interval(const access_reliable_t * p_message)
     uint32_t interval = (ttl * ACCESS_RELIABLE_HOP_PENALTY) + ACCESS_RELIABLE_INTERVAL_DEFAULT;
     if (NRF_MESH_UNSEG_PAYLOAD_SIZE_MAX < length)
     {
-        interval += ((length + (PACKET_MESH_TRS_SEG_ACCESS_PDU_MAX_SIZE - 1)) /
-                PACKET_MESH_TRS_SEG_ACCESS_PDU_MAX_SIZE) * ACCESS_RELIABLE_SEGMENT_COUNT_PENALTY;
+        interval += ((length + (NRF_MESH_SEG_SIZE - 1))/ NRF_MESH_SEG_SIZE) * ACCESS_RELIABLE_SEGMENT_COUNT_PENALTY;
     }
-    return MIN(p_message->timeout, interval);
+    return interval;
 }
 
 static void add_reliable_message(uint16_t index, const access_reliable_t * p_message)
@@ -287,6 +271,7 @@ static void add_reliable_message(uint16_t index, const access_reliable_t * p_mes
     m_reliable.active_count++;
     bearer_event_critical_section_end();
 }
+
 
 static void remove_and_reschedule(uint16_t index)
 {
@@ -329,18 +314,6 @@ void access_reliable_message_rx_cb(access_model_handle_t model_handle, const acc
     bearer_event_critical_section_end();
 }
 
-bool access_reliable_model_is_free(access_model_handle_t model_handle)
-{
-    for (uint32_t i = 0; i < ACCESS_RELIABLE_TRANSFER_COUNT; ++i)
-    {
-        if (m_reliable.pool[i].in_use && m_reliable.pool[i].params.model_handle == model_handle)
-        {
-            return false;
-        }
-    }
-    return true;
-}
-
 /* ******************* Public API ******************* */
 
 void access_reliable_init(void)
@@ -357,24 +330,8 @@ void access_reliable_cancel_all(void)
         m_reliable.active_count = 0;
         timer_sch_abort(&m_reliable.timer);
     }
-
-    /* Cancel all active transfers */
-    for (uint32_t i = 0; i < ACCESS_RELIABLE_TRANSFER_COUNT; ++i)
-    {
-        if (m_reliable.pool[i].in_use)
-        {
-            access_model_handle_t model_handle = m_reliable.pool[i].params.model_handle;
-            access_reliable_cb_t status_cb = m_reliable.pool[i].params.status_cb;
-
-            memset(&m_reliable.pool[i], 0, sizeof(access_reliable_ctx_t));
-
-            /* Notify model */
-            void * p_args;
-            NRF_MESH_ERROR_CHECK(access_model_p_args_get(model_handle, &p_args));
-            status_cb(model_handle, p_args, ACCESS_RELIABLE_TRANSFER_CANCELLED);
-        }
-    }
-
+    /* Add reliable status canceled to notify the potentially active models? */
+    memset(&m_reliable.pool[0], 0, sizeof(access_reliable_ctx_t) * ACCESS_RELIABLE_TRANSFER_COUNT);
     bearer_event_critical_section_end();
 }
 
@@ -388,16 +345,11 @@ uint32_t access_model_reliable_cancel(access_model_handle_t model_handle)
     {
         uint32_t status;
         uint16_t index;
-        void * p_args;
         bearer_event_critical_section_begin();
         if (find_index(model_handle, &index))
         {
             status = NRF_SUCCESS;
             remove_and_reschedule(index);
-
-            /* Notify model */
-            NRF_MESH_ERROR_CHECK(access_model_p_args_get(model_handle, &p_args));
-            m_reliable.pool[index].params.status_cb(model_handle, p_args, ACCESS_RELIABLE_TRANSFER_CANCELLED);
         }
         else
         {
@@ -408,6 +360,7 @@ uint32_t access_model_reliable_cancel(access_model_handle_t model_handle)
         return status;
     }
 }
+
 
 uint32_t access_model_reliable_publish(const access_reliable_t * p_reliable)
 {
@@ -434,7 +387,7 @@ uint32_t access_model_reliable_publish(const access_reliable_t * p_reliable)
     else
     {
         status = access_model_publish(p_reliable->model_handle, &p_reliable->message);
-        if (NRF_SUCCESS == status || NRF_ERROR_NO_MEM == status || NRF_ERROR_INVALID_STATE == status)
+        if (NRF_SUCCESS == status || NRF_ERROR_NO_MEM == status)
         {
             /** @todo If we get @c NRF_ERROR_NO_MEM, we could be even "smarter" and retry in @ref
              * ACCESS_RELIABLE_RETRY_DELAY scaled based on advertising intervals or something.
@@ -447,4 +400,5 @@ uint32_t access_model_reliable_publish(const access_reliable_t * p_reliable)
             return status;
         }
     }
+
 }

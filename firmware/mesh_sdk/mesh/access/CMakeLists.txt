@@ -1,11 +1,12 @@
 # TODO: Because of the weak linkage, compiling ACCESS as a library isn't working.
 
+set(NODE_CONFIG_SOURCE_FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/nrf_mesh_node_config.c" CACHE INTERNAL "")
+
 set(ACCESS_SOURCE_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/access_publish.c"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/access_publish_retransmission.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/access.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/access_reliable.c"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/access_loopback.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/device_state_manager.c" CACHE INTERNAL "")
 
 set(ACCESS_INCLUDE_DIRS
@@ -24,16 +25,13 @@ set(lint_include_dirs
     ${CMAKE_CURRENT_SOURCE_DIR}/../core/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../dfu/api
     ${CMAKE_CURRENT_SOURCE_DIR}/../dfu/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../gatt/api
-    ${CMAKE_CURRENT_SOURCE_DIR}/../gatt/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../examples/templates
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../models/foundation/config/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../models/foundation/health/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../app
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../models/config/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../models/health/include
     ${${SOFTDEVICE}_INCLUDE_DIRS}
-    ${${PLATFORM}_INCLUDE_DIRS}
-    ${${nRF5_SDK_VERSION}_INCLUDE_DIRS})
+    ${${PLATFORM}_INCLUDE_DIRS})
 
 add_pc_lint(access_${PLATFORM}
-    "${ACCESS_SOURCE_FILES}"
+    "${ACCESS_SOURCE_FILES};${NODE_CONFIG_SOURCE_FILES}"
     "${lint_include_dirs}"
     "${${PLATFORM}_DEFINES};${${SOFTDEVICE}_DEFINES}")

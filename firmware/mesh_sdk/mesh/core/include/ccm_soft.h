@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -57,9 +57,6 @@
 /** Length of nonce. */
 #define CCM_NONCE_LENGTH (13)
 
-/** Longest MIC allowed. */
-#define CCM_MIC_LENGTH_MAX  (16)
-
 /**
  * Struct for passing AES-CCM encryption data.
  *
@@ -69,12 +66,15 @@ typedef struct
 {
     const uint8_t * p_key;                  /**< Block cipher key. */
     const uint8_t * p_nonce;                /**< Nonce. */
-    const uint8_t * p_m;                    /**< Message to authenticate and encrypt/decrypt. Set
-                                             *   to NULL to skip decryption stage. */
+    const uint8_t * p_m;                    /**< Message to authenticate and encrypt/decrypt. */
+
     uint16_t  m_len;                        /**< Message size (in octets). */
+
     const uint8_t * p_a;                    /**< Additional authenticated data. */
     uint16_t a_len;                         /**< Additional data size (in octets). */
+
     uint8_t * p_out;                        /**< (Out) Encrypted/decrypted output. */
+
     uint8_t * p_mic;                        /**< (Out) Message Integrety Check value */
     uint8_t   mic_len;                      /**< Length of the message integrity check value. */
 } ccm_soft_data_t;

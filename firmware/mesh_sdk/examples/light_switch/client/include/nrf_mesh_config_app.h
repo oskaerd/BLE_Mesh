@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -49,17 +49,6 @@
  */
 
 /**
- * @defgroup MODEL_CONFIG Model layer configuration parameters
- */
-
-/** Define for acknowledging message transaction timeout.
- * @note Mesh Profile Specification v1.0 recommends this to be minimum 60s.
- */
-#define MODEL_ACKNOWLEDGED_TRANSACTION_TIMEOUT  (SEC_TO_US(10))
-
-/** @} end of MODEL_CONFIG */
-
-/**
  * @defgroup DEVICE_CONFIG Device configuration
  *
  * @{
@@ -68,11 +57,14 @@
 /** Device company identifier. */
 #define DEVICE_COMPANY_ID (ACCESS_COMPANY_ID_NORDIC)
 
-/** Device product identifier. */
+/** Device product identifier*/
 #define DEVICE_PRODUCT_ID (0x0000)
 
-/** Device version identifier. */
+/** Device version identifier */
 #define DEVICE_VERSION_ID (0x0000)
+
+/** Supported features of the device. @see config_feature_bit_t */
+#define DEVICE_FEATURES (CONFIG_FEATURE_RELAY_BIT)
 
 /** @} end of DEVICE_CONFIG */
 
@@ -84,31 +76,31 @@
 /**
  * The default TTL value for the node.
  */
-#define ACCESS_DEFAULT_TTL (SERVER_NODE_COUNT > NRF_MESH_TTL_MAX ? NRF_MESH_TTL_MAX : SERVER_NODE_COUNT)
+#define ACCESS_DEFAULT_TTL (SERVER_COUNT)
 
 /**
  * The number of models in the application.
  *
- * @note To fit the configuration and health models, this value must equal at least
- * the number of models needed by the application plus two.
+ * @note This value has to be greater than two to fit the configuration and health models,
+ * plus the number of models needed by the application.
  */
-#define ACCESS_MODEL_COUNT (1 + /* Configuration server */  \
-                            1 + /* Health server */  \
-                            2 + /* Generic OnOff client (2 groups) */ \
-                            2   /* Generic OnOff client (2 unicast) */)
+#define ACCESS_MODEL_COUNT (1 + /* Configuration client */  \
+                            1 + /* Health client */  \
+                            1 + /* Simple OnOff client (group) */ \
+                            SERVER_COUNT /* Simple OnOff client (per server) */)
 
 /**
  * The number of elements in the application.
  *
- * @warning If the application is to support _multiple instances_ of the _same_ model, these instances
- * cannot be in the same element and a separate element is needed for each new instance of the same model.
+ * @warning If the application is to support multiple _instances_ of the _same_ model, they cannot
+ * belong in the same element and a separate element is needed for the new instance.
  */
-#define ACCESS_ELEMENT_COUNT (1 + CLIENT_MODEL_INSTANCE_COUNT) /* One element per Generic OnOff client instance */
+#define ACCESS_ELEMENT_COUNT (1 + SERVER_COUNT) /* One element per Simple OnOff client instance */
 
 /**
  * The number of allocated subscription lists for the application.
  *
- * @note This value must equal @ref ACCESS_MODEL_COUNT minus the number of
+ * @note The application should set this number to @ref ACCESS_MODEL_COUNT minus the number of
  * models operating on shared states.
  */
 #define ACCESS_SUBSCRIPTION_LIST_COUNT (ACCESS_MODEL_COUNT)
@@ -119,11 +111,11 @@
 #define ACCESS_FLASH_PAGE_COUNT (1)
 
 /**
- * @defgroup ACCESS_RELIABLE_CONFIG Configuration of access layer reliable transfer
+ * @defgroup ACCESS_RELIABLE_CONFIG Access reliable transfer configuration
  * @{
  */
 
-/** Number of the allowed parallel transfers (size of the internal context pool). */
+/** Number of allowed parallel transfers (size of internal context pool). */
 #define ACCESS_RELIABLE_TRANSFER_COUNT (ACCESS_MODEL_COUNT)
 
 /** @} end of ACCESS_RELIABLE_CONFIG */
@@ -138,49 +130,20 @@
  * @{
  */
 /** Maximum number of subnetworks. */
-#define DSM_SUBNET_MAX                                  (4)
-/** Maximum number of applications. */
-#define DSM_APP_MAX                                     (8)
-/** Maximum number of device keys. */
-#define DSM_DEVICE_MAX                                  (1)
+#define DSM_SUBNET_MAX                                  (1)
+/** Maximum number of applications */
+#define DSM_APP_MAX                                     (1)
+/** Maximum number of device keys */
+#define DSM_DEVICE_MAX                                  (SERVER_COUNT)
 /** Maximum number of virtual addresses. */
 #define DSM_VIRTUAL_ADDR_MAX                            (1)
 /** Maximum number of non-virtual addresses. One for each of the servers and a group address. */
-#define DSM_NONVIRTUAL_ADDR_MAX                         (ACCESS_MODEL_COUNT + 1)
-/** Number of flash pages reserved for the DSM storage. */
+#define DSM_NONVIRTUAL_ADDR_MAX                         (SERVER_COUNT + 1)
+/** Number of flash pages reserved for the DSM storage */
 #define DSM_FLASH_PAGE_COUNT                            (1)
 /** @} end of DSM_CONFIG */
 
+
 /** @} */
-
-/**
- * @defgroup NRF_MESH_CONFIG_CORE Compile time configuration
- * Configuration of the compilation of the core mesh modules.
- * @ingroup CORE_CONFIG
- * @{
- */
-
-/**
- * @defgroup MESH_CONFIG_GATT GATT configuration defines
- * @{
- */
-/** PB-GATT feature. To be enabled only in combination with linking GATT files. */
-#define MESH_FEATURE_PB_GATT_ENABLED                    (1)
-/** GATT proxy feature. To be enabled only in combination with linking GATT proxy files. */
-#define MESH_FEATURE_GATT_PROXY_ENABLED                 (1)
-/** @} end of MESH_CONFIG_GATT */
-
-/**
- * @defgroup BLE_SOFTDEVICE_SUPPORT_CONFIG BLE SoftDevice support module configuration.
- * @ingroup MESH_API_GROUP_APP_SUPPORT
- * Configuration for compile time. Part of BLE SoftDevice support module.
- *
- * @{
- */
-/** GAP device name. */
-#define GAP_DEVICE_NAME                 "nRF5x Mesh Switch"
-/** @} end of BLE_SOFTDEVICE_SUPPORT_CONFIG */
-
-/** @} end of NRF_MESH_CONFIG_CORE */
 
 #endif /* NRF_MESH_CONFIG_APP_H__ */

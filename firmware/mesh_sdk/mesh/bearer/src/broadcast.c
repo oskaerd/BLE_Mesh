@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -41,7 +41,6 @@
 #include "timeslot.h"
 #include "nrf_mesh_config_bearer.h"
 #include "nrf_mesh_assert.h"
-#include "mesh_pa_lna_internal.h"
 
 #ifndef BROADCAST_DEBUG
 #define BROADCAST_DEBUG 0
@@ -73,26 +72,23 @@ PREAMBLE is one byte long...For MODE = Ble_2Mbit the PREAMBLE has to be set to 2
 register" */
 #if defined(NRF51)
 #define RADIO_DISABLE_TO_DISABLED_DELAY_US 4
-#define PA_SETUP_OVERHEAD_US 6
 #elif defined(NRF52_SERIES)
 #define RADIO_PREAMBLE_LENGTH_2MBIT_EXTRA_BYTES 1
 #define RADIO_DISABLE_TO_DISABLED_DELAY_US 6
-#define PA_SETUP_OVERHEAD_US 1
 #endif
 
-#define BROADCAST_TIMER_INDEX_TIMESTAMP (0)
-#define BROADCAST_TIMER_INDEX_PA_SETUP  (1)
-#define BROADCAST_PPI_CH (TS_TIMER_PPI_CH_START + TS_TIMER_INDEX_RADIO)
+#define RADIO_TX_RAMPUP_TIME_US 140
+
+#define BROADCAST_TIMER_INDEX (TIMER_INDEX_RADIO)
 
 static uint8_t m_next_channel_index;
-static timestamp_t m_action_start_time; /**< Start of the action (in device time, not timeslot time) */
 
 static void configure_timer_capture(void)
 {
     /* Capture the timestamp when the packet address has been sent, to use in reporting. */
-    NRF_PPI->CH[BROADCAST_PPI_CH].EEP = (uint32_t) &NRF_RADIO->EVENTS_ADDRESS;
-    NRF_PPI->CH[BROADCAST_PPI_CH].TEP = (uint32_t) &BEARER_ACTION_TIMER->TASKS_CAPTURE[BROADCAST_TIMER_INDEX_TIMESTAMP];
-    NRF_PPI->CHENSET = (1UL << BROADCAST_PPI_CH);
+    NRF_PPI->CH[TIMER_PPI_CH_START + BROADCAST_TIMER_INDEX].EEP = (uint32_t) &NRF_RADIO->EVENTS_ADDRESS;
+    NRF_PPI->CH[TIMER_PPI_CH_START + BROADCAST_TIMER_INDEX].TEP = (uint32_t) &NRF_TIMER0->TASKS_CAPTURE[BROADCAST_TIMER_INDEX];
+    NRF_PPI->CHENSET = (1UL << (TIMER_PPI_CH_START + BROADCAST_TIMER_INDEX));
 }
 
 static inline void configure_next_channel(const broadcast_params_t * p_params)
@@ -104,11 +100,10 @@ static inline void prepare_last_tx(void)
 {
     NRF_RADIO->SHORTS = (RADIO_SHORTS_READY_START_Msk |
                          RADIO_SHORTS_END_DISABLE_Msk);
-    mesh_pa_lna_setup_stop();
 }
 
 /* Start of the alloted time slice for the broadcast event */
-static void broadcast_start(ts_timestamp_t start_time, void* p_args)
+static void broadcast_start(timestamp_t start_time, void* p_args)
 {
     DEBUG_PIN_BROADCAST_ON(DEBUG_PIN_BROADCAST_START);
     DEBUG_PIN_BROADCAST_ON(DEBUG_PIN_BROADCAST_ACTIVE);
@@ -120,21 +115,11 @@ static void broadcast_start(ts_timestamp_t start_time, void* p_args)
     radio_config_access_addr_set(p_broadcast->params.access_address, 0);
     radio_config_channel_set(p_broadcast->params.p_channels[0]);
     m_next_channel_index = 1;
-    m_action_start_time = ts_timer_to_device_time(start_time);
     NRF_RADIO->PACKETPTR = (uint32_t) p_broadcast->params.p_packet;
     NRF_RADIO->EVENTS_DISABLED = 0;
     NRF_RADIO->INTENSET = RADIO_INTENSET_DISABLED_Msk;
 
-
-    /* To set the power amplifier timer, we capture the current timestamp and move it to start some
-     * time before the radio starts sending. As this code runs in the highest interrupt level, the
-     * time between the timer capture and the TXEN trigger will be deterministic.
-     */
-    BEARER_ACTION_TIMER->TASKS_CAPTURE[BROADCAST_TIMER_INDEX_PA_SETUP] = 1;
     NRF_RADIO->TASKS_TXEN = 1;
-
-    mesh_pa_setup_start(BEARER_ACTION_TIMER->CC[BROADCAST_TIMER_INDEX_PA_SETUP] + PA_SETUP_OVERHEAD_US,
-                        BROADCAST_TIMER_INDEX_PA_SETUP);
 
     if (p_broadcast->params.channel_count > 1)
     {
@@ -157,10 +142,10 @@ static void broadcast_start(ts_timestamp_t start_time, void* p_args)
 
 static inline void tx_complete_notify_user(broadcast_t * p_broadcast)
 {
-    const timestamp_t tx_timestamp = m_action_start_time + BEARER_ACTION_TIMER->CC[BROADCAST_TIMER_INDEX_TIMESTAMP];
-    const ts_timestamp_t user_cb_time_start = ts_timer_now();
+    const timestamp_t tx_timestamp = timeslot_start_time_get() + NRF_TIMER0->CC[BROADCAST_TIMER_INDEX];
+    const timestamp_t user_cb_time_start = timer_now();
     p_broadcast->params.tx_complete_cb(&p_broadcast->params, tx_timestamp);
-    const ts_timestamp_t user_cb_time_end = ts_timer_now();
+    const timestamp_t user_cb_time_end = timer_now();
 #if BROADCAST_DEBUG
     p_broadcast->debug.prev_tx_complete_app_time_us = user_cb_time_end - user_cb_time_start;
 #endif
@@ -169,7 +154,6 @@ static inline void tx_complete_notify_user(broadcast_t * p_broadcast)
 static inline void end_action(broadcast_t * p_broadcast)
 {
     DEBUG_PIN_BROADCAST_OFF(DEBUG_PIN_BROADCAST_ACTIVE);
-    mesh_pa_lna_cleanup();
     bearer_handler_action_end();
     p_broadcast->active = false;
 }
@@ -184,8 +168,6 @@ static void radio_irq_handler(void* p_args)
     NRF_MESH_ASSERT(NRF_RADIO->EVENTS_DISABLED);
     NRF_RADIO->EVENTS_DISABLED = 0;
     m_next_channel_index++;
-
-    mesh_pa_lna_disable_start();
 
     if (m_next_channel_index > p_broadcast->params.channel_count)
     {
@@ -214,21 +196,21 @@ static void radio_irq_handler(void* p_args)
     DEBUG_PIN_BROADCAST_OFF(DEBUG_PIN_BROADCAST_RADIO_EVT);
 }
 
-static inline ts_timestamp_t time_required_to_send_us(const packet_t * p_packet, uint8_t channel_count, radio_mode_t radio_mode)
+static inline uint32_t time_required_to_send_us(const packet_t * p_packet, uint8_t channel_count, radio_mode_t radio_mode)
 {
     static const uint8_t radio_mode_to_us_per_byte[RADIO_MODE_END] =  {8, 4, 32, 8
                                                             #ifdef NRF52_SERIES
                                                                            ,4, 128
                                                             #endif
                                                                            };
-    uint32_t packet_length_in_bytes = BLE_PACKET_OVERHEAD(RADIO_MODE_BLE_1MBIT) + p_packet->header.length;
+    uint32_t packet_length_in_bytes = BLE_PACKET_OVERHEAD(RADIO_MODE_BLE_1MBIT) + BLE_ADV_PACKET_HEADER_LENGTH + p_packet->header.length;
 #ifdef NRF52_SERIES
     if (radio_mode == RADIO_MODE_BLE_2MBIT)
     {
         packet_length_in_bytes += RADIO_PREAMBLE_LENGTH_2MBIT_EXTRA_BYTES;
     }
 #endif
-    uint32_t radio_time_per_channel = RADIO_RAMPUP_TIME +
+    uint32_t radio_time_per_channel = RADIO_TX_RAMPUP_TIME_US +
                                       (packet_length_in_bytes * radio_mode_to_us_per_byte[radio_mode]) +
                                       RADIO_DISABLE_TO_DISABLED_DELAY_US;
 

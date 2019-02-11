@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -369,11 +369,6 @@ void mesh_flash_user_callback_set(mesh_flash_user_t user, mesh_flash_op_cb_t cb)
 {
     TEST_ASSERT_EQUAL(MESH_FLASH_USER_MESH, user);
     g_flash_cb = cb;
-}
-
-void mesh_flash_set_suspended(bool suspended)
-{
-
 }
 
 bearer_event_flag_t bearer_event_flag_add(bearer_event_flag_callback_t callback)

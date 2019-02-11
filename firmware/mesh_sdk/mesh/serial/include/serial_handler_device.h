@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -58,13 +58,7 @@ void serial_handler_device_init(void);
  */
 void serial_handler_device_rx(const serial_packet_t* p_cmd);
 
-/**
- * Report a failed packet allocation
- *
- * @note If `UINT32_MAX` allocation failures has already been reported, this function will have no
- * effect.
- */
-void serial_handler_device_alloc_fail_report(void);
+
 
 /** @} */
 

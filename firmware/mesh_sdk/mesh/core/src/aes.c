@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -35,13 +35,32 @@
  * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 #include <stdint.h>
-#include "aes.h"
+#include <string.h>
 
+#ifdef SOFTDEVICE_PRESENT
+#define ECB_ENCRYPT_TIME_WORST_CASE_US 50
+#include "nrf_soc.h"
+#endif
+
+#include "nrf_error.h"
 #include "nrf.h"
 
-#if !AES_USE_SOFTDEVICE_ECB_WRAPPER
-void aes_encrypt(aes_data_t * p_aes_data)
+#include "aes.h"
+#include "timeslot.h"
+#include "toolchain.h"
+
+typedef struct
 {
+    uint8_t key[16];
+    uint8_t clear_text[16];
+    uint8_t cipher_text[16];
+} aes_data_t;
+
+#if !defined(SOFTDEVICE_PRESENT)
+static void aes_encrypt_hw(aes_data_t * p_aes_data)
+{
+    uint32_t was_masked;
+    _DISABLE_IRQS(was_masked);
     NRF_ECB->ECBDATAPTR = (uint32_t) p_aes_data;
 
     NRF_ECB->EVENTS_ENDECB  = 0;
@@ -53,5 +72,20 @@ void aes_encrypt(aes_data_t * p_aes_data)
     }
 
     NRF_ECB->EVENTS_ENDECB = 0;
+    _ENABLE_IRQS(was_masked);
 }
 #endif
+
+void aes_encrypt(const uint8_t * const key, const uint8_t * const clear_text, uint8_t * const cipher_text)
+{
+    aes_data_t aes_data;
+    memcpy(aes_data.key, key, NRF_MESH_KEY_SIZE);
+    memcpy(aes_data.clear_text, clear_text, NRF_MESH_KEY_SIZE);
+
+#if (defined(NRF51) || defined(NRF52_SERIES)) && SOFTDEVICE_PRESENT
+    (void) sd_ecb_block_encrypt((nrf_ecb_hal_data_t *) &aes_data);
+#else
+    aes_encrypt_hw(&aes_data);
+#endif
+    memcpy(cipher_text, aes_data.cipher_text, NRF_MESH_KEY_SIZE);
+}

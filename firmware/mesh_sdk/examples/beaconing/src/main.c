@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -37,42 +37,41 @@
 
 
 #include <stdio.h>
-#include "nrf_delay.h"
-#include "nrf_gpio.h"
+
+#include "nrf.h"
 #include "ble.h"
 #include "boards.h"
-#include "simple_hal.h"
+
 #include "nrf_mesh.h"
 #include "log.h"
+#include "nrf_mesh_node_config.h"
+
+#include "nrf_mesh_sdk.h"
+#include "simple_hal.h"
+
+/* For beaconing advertiser */
 #include "advertiser.h"
-#include "mesh_app_utils.h"
-#include "mesh_stack.h"
-#include "ble_softdevice_support.h"
-#include "mesh_provisionee.h"
-#include "nrf_mesh_config_examples.h"
-#include "app_timer.h"
-#include "example_common.h"
-#include "nrf_mesh_configure.h"
+
 
 #if defined(NRF51) && defined(NRF_MESH_STACK_DEPTH)
 #include "stack_depth.h"
 #endif
 
+#define ADVERTISER_BUFFER_SIZE  (128)
 
-#define STATIC_AUTH_DATA        {0x6E, 0x6F, 0x72, 0x64, 0x69, 0x63, 0x5F, 0x65, 0x78, 0x61, 0x6D, 0x70, 0x6C, 0x65, 0x5F, 0x31}
-#define ADVERTISER_BUFFER_SIZE  (64)
+#define LED_PIN_NUMBER (BSP_LED_0)
+#define LED_PIN_MASK   (1u << LED_PIN_NUMBER)
+
+#define STATIC_AUTH_DATA { 0xc7, 0xf7, 0x9b, 0xec, 0x9c, 0xf9, 0x74, 0xdd, 0xb9, 0x62, 0xbd, 0x9f, 0xd1, 0x72, 0xdd, 0x73 }
 
 /** Single advertiser instance. May periodically transmit one packet at a time. */
 static advertiser_t m_advertiser;
+static uint8_t m_adv_buffer[ADVERTISER_BUFFER_SIZE];
 
-static uint8_t      m_adv_buffer[ADVERTISER_BUFFER_SIZE];
-static bool         m_device_provisioned;
-
-
-static void rx_cb(const nrf_mesh_adv_packet_rx_data_t * p_rx_data)
+static void rx_callback(const nrf_mesh_adv_packet_rx_data_t * p_rx_data)
 {
     LEDS_OFF(BSP_LED_0_MASK);  /* @c LED_RGB_RED_MASK on pca10031 */
-    char msg[64];
+    char msg[128];
     (void) sprintf(msg, "RX [@%u]: RSSI: %3d ADV TYPE: %x ADDR: [%02x:%02x:%02x:%02x:%02x:%02x]",
                    p_rx_data->p_metadata->params.scanner.timestamp,
                    p_rx_data->p_metadata->params.scanner.rssi,
@@ -87,12 +86,12 @@ static void rx_cb(const nrf_mesh_adv_packet_rx_data_t * p_rx_data)
     LEDS_ON(BSP_LED_0_MASK);  /* @c LED_RGB_RED_MASK on pca10031 */
 }
 
-static void adv_init(void)
+static void init_advertiser(void)
 {
     advertiser_instance_init(&m_advertiser, NULL, m_adv_buffer, ADVERTISER_BUFFER_SIZE);
 }
 
-static void adv_start(void)
+static void start_advertiser(void)
 {
     advertiser_enable(&m_advertiser);
     static const uint8_t adv_data[] =
@@ -131,118 +130,65 @@ static void adv_start(void)
 
 }
 
-static void node_reset(void)
+static void configuration_setup(void * p_unused)
 {
-    __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "----- Node reset  -----\n");
-    hal_led_blink_ms(LEDS_MASK, LED_BLINK_INTERVAL_MS, LED_BLINK_CNT_RESET);
-    /* This function may return if there are ongoing flash operations. */
-    mesh_stack_device_reset();
+    __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Initializing and adding models\n");
+    /*
+    Add model initialization here, if you wish to support a mesh model on this node.
+    */
+    hal_led_mask_set(LEDS_MASK, true);
 }
 
-static void config_server_evt_cb(const config_server_evt_t * p_evt)
-{
-    if (p_evt->type == CONFIG_SERVER_EVT_NODE_RESET)
-    {
-        node_reset();
-    }
-}
-
-static void device_identification_start_cb(uint8_t attention_duration_s)
-{
-    hal_led_mask_set(LEDS_MASK, false);
-    hal_led_blink_ms(BSP_LED_2_MASK  | BSP_LED_3_MASK,
-                     LED_BLINK_ATTENTION_INTERVAL_MS,
-                     LED_BLINK_ATTENTION_COUNT(attention_duration_s));
-}
-
-static void provisioning_aborted_cb(void)
-{
-    hal_led_blink_stop();
-}
-
-static void provisioning_complete_cb(void)
+static void provisioning_complete(void * p_unused)
 {
     __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Successfully provisioned\n");
-
-    dsm_local_unicast_address_t node_address;
-    dsm_local_unicast_addresses_get(&node_address);
-    __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Node Address: 0x%04x \n", node_address.address_start);
-
-    hal_led_blink_stop();
-    hal_led_mask_set(LEDS_MASK, LED_MASK_STATE_OFF);
-    hal_led_blink_ms(LEDS_MASK, LED_BLINK_INTERVAL_MS, LED_BLINK_CNT_PROV);
-}
-
-static void mesh_init(void)
-{
-    mesh_stack_init_params_t init_params =
-    {
-        .core.irq_priority = NRF_MESH_IRQ_PRIORITY_LOWEST,
-        .core.lfclksrc     = DEV_BOARD_LF_CLK_CFG,
-        .models.config_server_cb = config_server_evt_cb
-    };
-    ERROR_CHECK(mesh_stack_init(&init_params, &m_device_provisioned));
-
-    /* Start listening for incoming packets */
-    nrf_mesh_rx_cb_set(rx_cb);
-
-    /* Start Advertising own beacon */
-    adv_init();
-}
-
-static void initialize(void)
-{
-#if defined(NRF51) && defined(NRF_MESH_STACK_DEPTH)
-    stack_depth_paint_stack();
-#endif
-
-    ERROR_CHECK(app_timer_init());
-    hal_leds_init();
-
-    __LOG_INIT(LOG_SRC_APP, LOG_LEVEL_INFO, log_callback_rtt);
-    __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "----- Bluetooth Mesh Beacon Example -----\n");
-
-    ble_stack_init();
-
-    mesh_init();
-
-    __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Initialization complete!\n");
-}
-
-static void start(void)
-{
-    if (!m_device_provisioned)
-    {
-        static const uint8_t static_auth_data[NRF_MESH_KEY_SIZE] = STATIC_AUTH_DATA;
-        mesh_provisionee_start_params_t prov_start_params =
-        {
-            .p_static_data    = static_auth_data,
-            .prov_complete_cb = provisioning_complete_cb,
-            .prov_device_identification_start_cb = device_identification_start_cb,
-            .prov_device_identification_stop_cb = NULL,
-            .prov_abort_cb = provisioning_aborted_cb,
-            .p_device_uri = EX_URI_BEACON
-        };
-        ERROR_CHECK(mesh_provisionee_prov_start(&prov_start_params));
-    }
-    adv_start();
-
-    mesh_app_uuid_print(nrf_mesh_configure_device_uuid_get());
-
-    ERROR_CHECK(mesh_stack_start());
-
-    __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Bluetooth Mesh Beacon example started!\n");
-
-    hal_led_mask_set(LEDS_MASK, LED_MASK_STATE_OFF);
-    hal_led_blink_ms(LEDS_MASK, LED_BLINK_INTERVAL_MS, LED_BLINK_CNT_START);
+    hal_led_mask_set(LEDS_MASK, false);
+    hal_led_blink_ms(LED_PIN_MASK, 200, 4);
 }
 
 int main(void)
 {
-    initialize();
-    start();
+#if defined(NRF51) && defined(NRF_MESH_STACK_DEPTH)
+    stack_depth_paint_stack();
+#endif
+    nrf_gpio_range_cfg_output(LED_START, LED_STOP);
+    for (uint32_t i = LED_START; i <= LED_STOP; ++i)
+    {
+        nrf_gpio_pin_set(i);
+    }
 
-    for (;;)
+    __LOG_INIT(LOG_SRC_APP, LOG_LEVEL_INFO, log_callback_rtt);
+    __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "----- Bluetooth Mesh Beacon Example -----\n");
+
+    static const uint8_t static_auth_data[NRF_MESH_KEY_SIZE] = STATIC_AUTH_DATA;
+    static nrf_mesh_node_config_params_t config_params =
+        {.prov_caps = NRF_MESH_PROV_OOB_CAPS_DEFAULT(ACCESS_ELEMENT_COUNT)};
+    config_params.p_static_data = static_auth_data;
+    config_params.complete_callback = provisioning_complete;
+    config_params.setup_callback = configuration_setup;
+    config_params.irq_priority = NRF_MESH_IRQ_PRIORITY_LOWEST;
+
+#if defined(S110)
+    config_params.lf_clk_cfg = NRF_CLOCK_LFCLKSRC_XTAL_20_PPM;
+#elif SD_BLE_API_VERSION >= 5
+    config_params.lf_clk_cfg.source = NRF_CLOCK_LF_SRC_XTAL;
+    config_params.lf_clk_cfg.accuracy = NRF_CLOCK_LF_ACCURACY_20_PPM;
+#else
+    config_params.lf_clk_cfg.source = NRF_CLOCK_LF_SRC_XTAL;
+    config_params.lf_clk_cfg.xtal_accuracy = NRF_CLOCK_LF_XTAL_ACCURACY_20_PPM;
+#endif
+
+    ERROR_CHECK(nrf_mesh_node_config(&config_params));
+
+    /* Start listening for incoming packets */
+    nrf_mesh_rx_cb_set(rx_callback);
+    /* Start Advertising own beacon */
+    init_advertiser();
+    start_advertiser();
+
+    __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Initialization complete!\n");
+
+    while (true)
     {
         (void)sd_app_evt_wait();
     }

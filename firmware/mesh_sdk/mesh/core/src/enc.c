@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -69,11 +69,7 @@ void enc_key_generate(uint8_t * p_key)
 
 void enc_aes_encrypt(const uint8_t * p_key, const uint8_t * p_plaintext, uint8_t * p_result)
 {
-    aes_data_t aes_data;
-    memcpy(aes_data.key, p_key, NRF_MESH_KEY_SIZE);
-    memcpy(aes_data.cleartext, p_plaintext, NRF_MESH_KEY_SIZE);
-    aes_encrypt(&aes_data);
-    memcpy(p_result, aes_data.ciphertext, NRF_MESH_KEY_SIZE);
+    aes_encrypt(p_key, p_plaintext, p_result);
 }
 
 void enc_aes_cmac(const uint8_t * p_key, const uint8_t * p_data, uint16_t data_len, uint8_t * p_result)
@@ -106,7 +102,7 @@ void enc_nonce_generate(const network_packet_metadata_t * p_net_metadata,
         case ENC_NONCE_NET:
         {
             enc_nonce_net_t * p_net_nonce = (enc_nonce_net_t *) p_nonce;
-            p_net_nonce->type     = type;
+            p_net_nonce->type     = ENC_NONCE_NET;
             p_net_nonce->ttl      = p_net_metadata->ttl;
             p_net_nonce->ctl      = p_net_metadata->control_packet;
             p_net_nonce->seq      = LE2BE24(p_net_metadata->internal.sequence_number);
@@ -126,17 +122,6 @@ void enc_nonce_generate(const network_packet_metadata_t * p_net_metadata,
             p_app_nonce->src      = LE2BE16(p_net_metadata->src);
             p_app_nonce->dst      = LE2BE16(p_net_metadata->dst.value);
             p_app_nonce->iv_index = LE2BE32(p_net_metadata->internal.iv_index);
-            break;
-        }
-        case ENC_NONCE_PROXY:
-        {
-            enc_nonce_proxy_t * p_proxy_nonce = (enc_nonce_proxy_t *) p_nonce;
-            p_proxy_nonce->type     = type;
-            p_proxy_nonce->pad      = 0;
-            p_proxy_nonce->seq      = LE2BE24(p_net_metadata->internal.sequence_number);
-            p_proxy_nonce->src      = LE2BE16(p_net_metadata->src);
-            p_proxy_nonce->pad2     = 0;
-            p_proxy_nonce->iv_index = LE2BE32(p_net_metadata->internal.iv_index);
             break;
         }
         default:
@@ -168,10 +153,8 @@ void enc_k2(const uint8_t * p_netkey, const uint8_t * p_p, uint16_t length_p,
             nrf_mesh_network_secmat_t * p_output)
 {
     NRF_MESH_ASSERT(p_netkey != NULL && p_p != NULL && p_output != NULL);
-    NRF_MESH_ASSERT(length_p >= ENC_K2_P_VALUE_MINLEN);
-    NRF_MESH_ASSERT(length_p <= ENC_K2_P_VALUE_MAXLEN);
 
-    uint8_t tmp[NRF_MESH_KEY_SIZE + ENC_K2_P_VALUE_MAXLEN + 1];
+    uint8_t tmp[NRF_MESH_KEY_SIZE + length_p + 1];
     const uint8_t salt_input[] = ENC_K2_SALT_INPUT;
     enc_s1(salt_input, sizeof(salt_input), tmp);
 

@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -40,7 +40,6 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "nrf_mesh.h"
-#include "timeslot_timer.h"
 #include "radio_config.h"
 #include "packet.h"
 #include "bearer_event.h"
@@ -74,7 +73,6 @@ typedef struct
     uint32_t successful_receives;           /**< Number of received packets. */
     uint32_t crc_failures;                  /**< Number of CRC failures. */
     uint32_t length_out_of_bounds;          /**< Number of packets with length out of bounds. */
-    uint32_t out_of_memory;                 /**< Number of times the scanner has ran out of memory. */
 } scanner_stats_t;
 
 /**
@@ -82,10 +80,8 @@ typedef struct
  * to the buffer.
  *
  * @param[in] p_packet Packet received.
- * @param[in] rx_timestamp_ts Timeslot timestamp of the packet RX, sampled at the first bit of the
- * header with the HF timer.
  */
-typedef void (*scanner_rx_callback_t)(const scanner_packet_t * p_packet, ts_timestamp_t rx_timestamp_ts);
+typedef void (*scanner_rx_callback_t)(const scanner_packet_t * p_packet);
 
 /**
  * Initializes the scanner module.
@@ -205,10 +201,8 @@ void scanner_config_reset(void);
  * Start scanner radio.
  *
  * @warning Only to be used by the bearer module.
-
- * @param[in] start_time Timestamp when the action timer was started.
  */
-void scanner_radio_start(ts_timestamp_t start_time);
+void scanner_radio_start(void);
 
 /**
  * Stop scanner radio.
@@ -223,13 +217,6 @@ void scanner_radio_stop(void);
  * @warning Only to be used by the bearer module.
  */
 void scanner_radio_irq_handler(void);
-
-/**
- * Scanner timer IRQ handler.
- *
- * @warning Only to be used by the bearer module.
- */
-void scanner_timer_irq_handler(void);
 
 /** @} */
 

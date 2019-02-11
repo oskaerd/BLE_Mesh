@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -42,7 +42,7 @@
 
 #include "ccm_soft.h"
 #include "nrf_mesh.h"
-#include "net_packet.h"
+#include "network.h"
 
 /**
  * @defgroup ENCRYPTION Encryption Module
@@ -54,21 +54,14 @@
  * @{
  */
 
-
-/** Shortest allowed P value in the K2 key derivation procedure. */
-#define ENC_K2_P_VALUE_MINLEN   1
-/** Longest allowed P value in the K2 key derivation procedure. */
-#define ENC_K2_P_VALUE_MAXLEN   16
-
 /**
  * Nonce types.
  */
 typedef enum
 {
-    ENC_NONCE_NET   = 0x00,              /**< Nonce for network data. */
-    ENC_NONCE_APP   = 0x01,              /**< Nonce for application data. */
-    ENC_NONCE_DEV   = 0x02,              /**< Nonce for device key data. */
-    ENC_NONCE_PROXY = 0x03               /**< Nonce for proxy configuration data. */
+    ENC_NONCE_NET = 0x00,              /**< Nonce for network data. */
+    ENC_NONCE_APP = 0x01,              /**< Nonce for application data. */
+    ENC_NONCE_DEV = 0x02               /**< Nonce for device key data. */
 } enc_nonce_t;
 
 /*lint -align_max(push) -align_max(1) */
@@ -105,20 +98,6 @@ typedef struct __attribute((packed))
  * Device key nonce structure.
  */
 typedef enc_nonce_app_t enc_nonce_dev_t;
-
-
-/**
- * Proxy nonce structure.
- */
-typedef struct __attribute((packed))
-{
-    uint8_t type;      /**< Nonce type. */
-    uint8_t pad;       /**< Padding. */
-    uint32_t seq : 24; /**< Sequence number. */
-    uint16_t src;      /**< Source address. */
-    uint16_t pad2;     /**< Padding zero bytes. */
-    uint32_t iv_index; /**< IV index. */
-} enc_nonce_proxy_t;
 
 /*lint -align_max(pop) */
 
@@ -203,8 +182,7 @@ void enc_k1(const uint8_t * p_ikm, const uint8_t ikm_length, const uint8_t * p_s
  * Network key material derivation function `k2`.
  *
  * @param[in]  p_netkey   Pointer to a buffer containing the 128 bit network key.
- * @param[in]  p_p        Pointer to a buffer containing the P value. The required minimum byte length
- * is @ref ENC_K2_P_VALUE_MINLEN, and the length cannot exceed @ref ENC_K2_P_VALUE_MAXLEN bytes.
+ * @param[in]  p_p        Pointer to a buffer containing the 8 bit or longer P value.
  * @param[in]  length_p   Length of the P value.
  * @param[out] p_output   Pointer to a buffer where the derived key material is stored.
  */

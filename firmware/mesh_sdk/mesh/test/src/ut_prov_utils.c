@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -38,14 +38,14 @@
 #include <unity.h>
 #include <cmock.h>
 
-#include "utils.h"
+#include "nordic_common.h"
 #include "prov_utils.h"
 #include "test_assert.h"
 
 #include "enc_mock.h"
 #include "uECC_mock.h"
 #include "rand_mock.h"
-#include "mesh_config_entry.h"
+#include "nordic_common.h"
 
 typedef struct
 {
@@ -54,19 +54,6 @@ typedef struct
 } oob_method_and_action_pair_t;
 
 static nrf_mesh_prov_ctx_t m_ctx;
-
-extern mesh_config_entry_params_t m_ecdh_offloading_params;
-
-uint32_t mesh_config_entry_set(mesh_config_entry_id_t id, const void * p_entry)
-{
-    return m_ecdh_offloading_params.callbacks.setter(id, p_entry);
-}
-
-uint32_t mesh_config_entry_get(mesh_config_entry_id_t id, void * p_entry)
-{
-    m_ecdh_offloading_params.callbacks.getter(id, p_entry);
-    return NRF_SUCCESS;
-}
 
 /* Simple integer power function. Converting between integers and floats can cause rounding errors. */
 static uint32_t pow__(uint32_t num, uint8_t p)
@@ -397,7 +384,7 @@ void test_generate_oob_data(void)
                 rand_hw_rng_get_IgnoreArg_p_result();
                 rand_hw_rng_get_ReturnMemThruPtr_p_result(&rand_output[j], 1);
                 prov_utils_generate_oob_data(&m_ctx, auth_value);
-                expected_auth_value[15] = (rand_output[j] % m_ctx.oob_size) + 1;
+                expected_auth_value[15] = (rand_output[j] % (m_ctx.oob_size + 1));
                 TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_auth_value, auth_value, PROV_AUTH_LEN);
             }
         }
@@ -571,40 +558,4 @@ void test_options(void)
     opt_in.opt.val = 0;
     TEST_ASSERT_EQUAL_HEX32(NRF_SUCCESS, prov_utils_opt_set(NRF_MESH_OPT_PROV_ECDH_OFFLOADING, &opt_in));
     TEST_ASSERT_EQUAL(false, prov_utils_use_ecdh_offloading());
-}
-
-void test_is_alphanumeric(void)
-{
-    static const unsigned char alphanumeric[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-
-    TEST_ASSERT_EQUAL(true,
-                      prov_utils_auth_data_is_alphanumeric(
-                          alphanumeric, sizeof(alphanumeric) - 1));
-
-
-    bool valid_input_values[UINT8_MAX] = {0}; /* False */
-    for (uint32_t i = 0; i < sizeof(alphanumeric) - 1; ++i)
-    {
-        valid_input_values[alphanumeric[i]] = true;
-    }
-
-    for (uint8_t i = 0; i < UINT8_MAX; ++i)
-    {
-        TEST_ASSERT_EQUAL(valid_input_values[i],
-                          prov_utils_auth_data_is_alphanumeric(&i, 1));
-    }
-}
-
-void test_is_number(void)
-{
-    uint32_t three_digits = 123;
-    uint32_t eight_digits = 12345678;
-    TEST_ASSERT_EQUAL(false, prov_utils_auth_data_is_valid_number((const uint8_t *) &three_digits, 2));
-    TEST_ASSERT_EQUAL(false, prov_utils_auth_data_is_valid_number((const uint8_t *) &three_digits, 1));
-    TEST_ASSERT_EQUAL(true, prov_utils_auth_data_is_valid_number((const uint8_t *) &three_digits, 3));
-    TEST_ASSERT_EQUAL(true, prov_utils_auth_data_is_valid_number((const uint8_t *) &three_digits, 4));
-
-    TEST_ASSERT_EQUAL(false, prov_utils_auth_data_is_valid_number((const uint8_t *) &eight_digits, 4));
-    TEST_ASSERT_EQUAL(true, prov_utils_auth_data_is_valid_number((const uint8_t *) &eight_digits, 8));
-
 }

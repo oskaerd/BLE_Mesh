@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -39,6 +39,7 @@
 #define PROVISIONING_H__
 
 #include "prov_pdu.h"
+#include "nrf_mesh_prov_bearer_adv.h"
 #include "nrf_mesh_prov.h"
 #include "nrf_mesh_prov_types.h"
 #include "nrf_mesh_assert.h"
@@ -73,7 +74,7 @@ static inline nrf_mesh_prov_ctx_t * prov_bearer_ctx_get(prov_bearer_t * p_bearer
 
 
 /**
- * Verifies the format of the provisioning data.
+ * Verify provisioning data.
  *
  * @param[in] p_data Data to verify
  *
@@ -83,21 +84,6 @@ static inline bool prov_data_is_valid(const nrf_mesh_prov_provisioning_data_t * 
 {
     return (p_data->netkey_index <= NRF_MESH_GLOBAL_KEY_INDEX_MAX &&
             nrf_mesh_address_type_get(p_data->address) == NRF_MESH_ADDRESS_TYPE_UNICAST);
-}
-
-/**
- * Verifies that the starting address assigned by the provisioner has enough room for all the
- * device's elements.
- *
- * @param[in] p_data Provisioning data structure.
- * @param[in] num_elements Number of elements in the device.
- *
- * @returns @c true if the address is valid.
- */
-static inline bool prov_address_is_valid(const nrf_mesh_prov_provisioning_data_t * p_data, uint8_t num_elements)
-{
-    return (nrf_mesh_address_type_get(p_data->address) == NRF_MESH_ADDRESS_TYPE_UNICAST &&
-            nrf_mesh_address_type_get(p_data->address + num_elements - 1) == NRF_MESH_ADDRESS_TYPE_UNICAST);
 }
 
 /**
@@ -174,7 +160,7 @@ uint32_t prov_tx_random(prov_bearer_t * p_bearer, const uint8_t * p_random);
  * Sends the provisioning invite message.
  *
  * @param[in, out] p_bearer The bearer instance to use.
- * @param[in] attention_duration_s The attention timer value in seconds.
+ * @param[in] attention_duration The attention timer value in seconds.
  * @param[out] p_confirmation_inputs The confirmation inputs array to update, see @ref nrf_mesh_prov_ctx.
  *
  * @retval NRF_SUCCESS Successfully sent a link establishment request.
@@ -183,7 +169,7 @@ uint32_t prov_tx_random(prov_bearer_t * p_bearer, const uint8_t * p_random);
  * @retval NRF_ERROR_NO_MEM The system is short of resources, try again later.
  * @retval NRF_ERROR_BUSY Another transmission is already in progress, wait for it to finish.
  */
-uint32_t prov_tx_invite(prov_bearer_t * p_bearer, uint8_t attention_duration_s, uint8_t * p_confirmation_inputs);
+uint32_t prov_tx_invite(prov_bearer_t * p_bearer, uint8_t attention_duration, uint8_t * p_confirmation_inputs);
 
 /**
  * Sends the provisioning start message

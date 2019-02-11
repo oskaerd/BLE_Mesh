@@ -1,4 +1,4 @@
-# Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+# Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -129,14 +129,7 @@ class Uart(threading.Thread, Device):
         self._write_lock = threading.Lock()
 
         self.logger.debug("log Opening port %s, baudrate %s, rtscts %s", port, baudrate, rtscts)
-
-        # We change the baudrate around to reset the UART state.
-        # This is a trick to force detection of flow control settings etc.
-        _trick_baudrate = 9600
-        if baudrate == _trick_baudrate:
-            _trick_baudrate = 115200
-        self.serial = Serial(port=port, baudrate=_trick_baudrate, rtscts=rtscts, timeout=0.1)
-        self.serial.baudrate = baudrate
+        self.serial = Serial(port=port, baudrate=baudrate, rtscts=rtscts, timeout=0.1)
 
         self.keep_running = True
         self.start()
@@ -162,17 +155,16 @@ class Uart(threading.Thread, Device):
 
     def run(self):
         for pkt in self.get_packet_from_uart():
-            self.logger.debug("RX: %s", pkt.hex())
             try:
                 if len(pkt) < 2:
                     self.logger.error('Invalid packet: %r', pkt)
                     continue
                 parsed_packet = event_deserialize(pkt)
                 if not parsed_packet:
-                    self.logger.error("Unable to deserialize %s", pkt.hex())
+                    self.logger.error("Unable to deserialize %r", pkt)
 
             except Exception:
-                self.logger.error('Exception with packet %s', pkt.hex())
+                self.logger.error('Exception with packet %r', pkt)
                 self.logger.error('traceback: %s', traceback.format_exc())
                 parsed_packet = None
 
@@ -187,7 +179,6 @@ class Uart(threading.Thread, Device):
     def write_data(self, data):
         with self._write_lock:
             if self.keep_running:
-                self.logger.debug("TX: %s", bytearray(data).hex())
                 self.serial.write(bytearray(data))
                 self.process_command(data)
 

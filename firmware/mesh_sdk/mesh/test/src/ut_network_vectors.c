@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -340,12 +340,19 @@ uint32_t transport_packet_in_mock_cb(const packet_mesh_trs_packet_t * p_packet,
 
 static packet_mesh_net_packet_t m_core_tx_buffer;
 
-core_tx_bearer_bitmap_t core_tx_packet_alloc_cb(const core_tx_alloc_params_t * p_params,
-                                                uint8_t ** pp_packet,
-                                                int calls)
+core_tx_bearer_t core_tx_packet_alloc_cb(uint32_t net_packet_len,
+                                         const core_tx_metadata_t * p_metadata,
+                                         uint8_t ** pp_packet,
+                                         nrf_mesh_tx_token_t token,
+                                         int calls)
 {
     *pp_packet = (uint8_t *) &m_core_tx_buffer;
-    return m_core_tx_alloc_success;
+    return m_core_tx_alloc_success ? p_metadata->bearer : 0;
+}
+
+void core_tx_packet_send_cb(const core_tx_metadata_t * p_metadata, uint8_t * p_packet, int calls)
+{
+    TEST_ASSERT_EQUAL(&m_core_tx_buffer, p_packet);
 }
 
 /*************** Static Helper Functions and Types ***************/
@@ -455,7 +462,7 @@ void test_packet_in(void)
 
     transport_packet_in_StubWithCallback(transport_packet_in_mock_cb);
     core_tx_packet_alloc_StubWithCallback(core_tx_packet_alloc_cb);
-    core_tx_packet_send_Ignore();
+    core_tx_packet_send_StubWithCallback(core_tx_packet_send_cb);
 
     mp_net_secmats = &test_network;
     m_net_secmat_count = 1;
@@ -473,7 +480,6 @@ void test_packet_in(void)
 
         net_state_rx_iv_index_get_ExpectAndReturn(test_vector.metadata.internal.iv_index & 0x01, test_vector.metadata.internal.iv_index);
 
-        core_tx_adv_is_enabled_ExpectAndReturn(CORE_TX_ROLE_RELAY, true);
         TEST_ASSERT_EQUAL(NRF_SUCCESS, network_packet_in(test_vector.p_encrypted_packet, test_vector.lengths.encrypted, &rx_metadata));
 
         TEST_ASSERT_EQUAL(0, m_net_secmat_get_calls_expect);
@@ -503,7 +509,7 @@ void test_packet_in(void)
         m_net_secmat_get_calls_expect = 3;
 
         net_state_rx_iv_index_get_ExpectAndReturn(test_vector.metadata.internal.iv_index & 0x01, test_vector.metadata.internal.iv_index);
-        core_tx_adv_is_enabled_ExpectAndReturn(CORE_TX_ROLE_RELAY, true);
+
         TEST_ASSERT_EQUAL(NRF_SUCCESS, network_packet_in(test_vector.p_encrypted_packet, test_vector.lengths.encrypted, &rx_metadata));
 
         TEST_ASSERT_EQUAL(0, m_net_secmat_get_calls_expect);
@@ -533,7 +539,7 @@ void test_self_receive(void)
         msg_cache_entry_exists_IgnoreAndReturn(false);
         net_state_rx_iv_index_get_ExpectAndReturn(test_vector.metadata.internal.iv_index & 0x01, test_vector.metadata.internal.iv_index);
 
-        TEST_ASSERT_EQUAL(NRF_ERROR_NOT_FOUND, network_packet_in(test_vector.p_encrypted_packet, test_vector.lengths.encrypted, &rx_metadata));
+        TEST_ASSERT_EQUAL(NRF_SUCCESS, network_packet_in(test_vector.p_encrypted_packet, test_vector.lengths.encrypted, &rx_metadata));
 
         TEST_ASSERT_EQUAL(0, m_net_secmat_get_calls_expect);
     }
@@ -546,7 +552,7 @@ void test_packet_out(void)
 
     m_core_tx_alloc_success = true;
     core_tx_packet_alloc_StubWithCallback(core_tx_packet_alloc_cb);
-    core_tx_packet_send_Ignore();
+    core_tx_packet_send_StubWithCallback(core_tx_packet_send_cb);
 
     net_state_iv_index_lock_Ignore();
 
@@ -568,7 +574,6 @@ void test_packet_out(void)
         network_tx_packet_buffer_t net_packet_buffer;
         net_packet_buffer.user_data.p_metadata = &test_vector.metadata;
         net_packet_buffer.user_data.payload_len = test_vector.lengths.transport;
-        net_packet_buffer.user_data.role = CORE_TX_ROLE_ORIGINATOR;
 
         memcpy(&m_core_tx_buffer.pdu[9],
                test_vector.p_transport_packet,
@@ -596,7 +601,6 @@ void test_packet_out(void)
         net_packet_buffer.user_data.p_metadata = &test_vector.metadata;
         net_packet_buffer.user_data.p_metadata->p_security_material = &test_network;
         net_packet_buffer.user_data.payload_len = test_vector.lengths.transport;
-        net_packet_buffer.user_data.role = CORE_TX_ROLE_ORIGINATOR;
 
         TEST_ASSERT_EQUAL(NRF_ERROR_NO_MEM, network_packet_alloc(&net_packet_buffer));
     }
@@ -626,7 +630,7 @@ void test_invalid_net_key_in(void)
 
         net_state_rx_iv_index_get_ExpectAndReturn(test_vector.metadata.internal.iv_index & 0x01, test_vector.metadata.internal.iv_index);
 
-        TEST_ASSERT_EQUAL(NRF_ERROR_NOT_FOUND, network_packet_in(test_vector.p_encrypted_packet, test_vector.lengths.encrypted, &rx_metadata));
+        TEST_ASSERT_EQUAL(NRF_SUCCESS, network_packet_in(test_vector.p_encrypted_packet, test_vector.lengths.encrypted, &rx_metadata));
 
         TEST_ASSERT_EQUAL(0, m_transport_packet_in.calls);
         TEST_ASSERT_EQUAL(0, m_net_secmat_get_calls_expect);

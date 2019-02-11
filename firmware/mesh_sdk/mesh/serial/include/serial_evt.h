@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -46,7 +46,6 @@
 #include "serial_types.h"
 #include "internal_event.h"
 #include "packet.h"
-
 /**
  * @defgroup SERIAL_EVT Serial events
  * @ingroup MESH_SERIAL
@@ -81,17 +80,15 @@
 #define SERIAL_OPCODE_EVT_PROV_LINK_ESTABLISHED              (0xC1) /**< Params: @ref serial_evt_prov_link_established_t */
 #define SERIAL_OPCODE_EVT_PROV_LINK_CLOSED                   (0xC2) /**< Params: @ref serial_evt_prov_link_closed_t */
 #define SERIAL_OPCODE_EVT_PROV_CAPS_RECEIVED                 (0xC3) /**< Params: @ref serial_evt_prov_caps_received_t */
-#define SERIAL_OPCODE_EVT_PROV_INVITE_RECEIVED               (0xC4) /**< Params: @ref serial_evt_prov_invite_received_t */
 #define SERIAL_OPCODE_EVT_PROV_COMPLETE                      (0xC5) /**< Params: @ref serial_evt_prov_complete_t */
 #define SERIAL_OPCODE_EVT_PROV_AUTH_REQUEST                  (0xC6) /**< Params: @ref serial_evt_prov_auth_request_t */
 #define SERIAL_OPCODE_EVT_PROV_ECDH_REQUEST                  (0xC7) /**< Params: @ref serial_evt_prov_ecdh_request_t */
 #define SERIAL_OPCODE_EVT_PROV_OUTPUT_REQUEST                (0xC8) /**< Params: @ref serial_evt_prov_output_request_t */
 #define SERIAL_OPCODE_EVT_PROV_FAILED                        (0xC9) /**< Params: @ref serial_evt_prov_failed_t */
-#define SERIAL_OPCODE_EVT_PROV_START_RECEIVED                (0xCA) /**< Params: @ref serial_evt_prov_start_received_t */
 
 #define SERIAL_OPCODE_EVT_MESH_MESSAGE_RECEIVED_UNICAST      (0xD0) /**< Params: @ref serial_evt_mesh_message_received_t */
 #define SERIAL_OPCODE_EVT_MESH_MESSAGE_RECEIVED_SUBSCRIPTION (0xD1) /**< Params: @ref serial_evt_mesh_message_received_t */
-#define SERIAL_OPCODE_EVT_MESH_TX_COMPLETE                   (0xD2) /**< Params: @ref serial_evt_mesh_tx_complete_t */
+#define SERIAL_OPCODE_EVT_MESH_TX_COMPLETE                   (0xD2) /**< Params: None. */
 #define SERIAL_OPCODE_EVT_MESH_IV_UPDATE_NOTIFICATION        (0xD3) /**< Params: @ref serial_evt_mesh_iv_update_t */
 #define SERIAL_OPCODE_EVT_MESH_KEY_REFRESH_NOTIFICATION      (0xD4) /**< Params: @ref serial_evt_mesh_key_refresh_t */
 #define SERIAL_OPCODE_EVT_MESH_SAR_FAILED                    (0xD7) /**< Params: None. */
@@ -105,7 +102,7 @@
 typedef struct __attribute((packed))
 {
     uint8_t operating_mode; /**< Operating mode of the device. see @ref serial_device_operating_mode_t for accepted values. */
-    uint8_t hw_error; /**< Hardware error code, or 0 if no error occurred. */
+    uint8_t hw_error; /**< Hardware error code, or 0 if no error occured. */
     uint8_t data_credit_available; /**< The number of bytes available in each of the tx and rx buffers. */
 } serial_evt_device_started_t;
 
@@ -171,19 +168,6 @@ typedef struct __attribute((packed))
     uint16_t input_oob_actions;  /**< Available OOB input actions. */
 } serial_evt_prov_caps_received_t;
 
-/** Provisioning invite event. */
-typedef struct __attribute((packed))
-{
-    uint8_t context_id;             /**< Context ID of the provisioning link. */
-    uint8_t attention_duration_s;   /**< Time in seconds during which the device will identify itself using any means it can. */
-} serial_evt_prov_invite_received_t;
-
-/** Provisioning start event. */
-typedef struct __attribute((packed))
-{
-    uint8_t context_id;             /**< Context ID of the provisioning link. */
-} serial_evt_prov_start_received_t;
-
 /** Provisioning complete event packet. */
 typedef struct __attribute((packed))
 {
@@ -235,8 +219,6 @@ typedef union __attribute((packed))
     serial_evt_prov_link_established_t link_established; /**< Link established event parameters. */
     serial_evt_prov_link_closed_t      link_closed;      /**< Link closed event parameters. */
     serial_evt_prov_caps_received_t    caps_received;    /**< Capabilities received parameters. */
-    serial_evt_prov_invite_received_t  invite_received;  /**< Invite received event params. */
-    serial_evt_prov_start_received_t   start_received;   /**< Start received event params. */
     serial_evt_prov_complete_t         complete;         /**< Provisioning complete event parameters. */
     serial_evt_prov_auth_request_t     auth_request;     /**< Authorization request event parameters. */
     serial_evt_prov_ecdh_request_t     ecdh_request;     /**< ECDH request event parameters. */
@@ -292,12 +274,6 @@ typedef struct __attribute((packed))
     uint8_t  data[SERIAL_EVT_MESH_MESSAGE_RECEIVED_DATA_MAXLEN];
 } serial_evt_mesh_message_received_t;
 
-/** Mesh TX complete event. */
-typedef struct __attribute((packed))
-{
-    nrf_mesh_tx_token_t token; /**< TX token for the completed packet. */
-} serial_evt_mesh_tx_complete_t;
-
 /** Mesh IV update event parameters. */
 typedef struct __attribute((packed))
 {
@@ -315,7 +291,6 @@ typedef struct __attribute((packed))
 typedef union __attribute((packed))
 {
     serial_evt_mesh_message_received_t  message_received; /**< Message received parameters. */
-    serial_evt_mesh_tx_complete_t       tx_complete;      /**< TX complete parameters. */
     serial_evt_mesh_iv_update_t         iv_update;        /**< IV update parameters. */
     serial_evt_mesh_key_refresh_t       key_refresh;      /**< Key refresh parameters. */
 } serial_evt_mesh_t;

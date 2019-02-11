@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -72,11 +72,8 @@ void access_flash_config_store(void);
 /**
  * Sets the default TTL for the node.
  * @param ttl The new value to use as the default TTL for message being sent from this node.
- *
- * @retval     NRF_SUCCESS              Successfully set default TTL.
- * @retval     NRF_ERROR_INVALID_PARAM  Invalid default TTL.
  */
-uint32_t access_default_ttl_set(uint8_t ttl);
+void access_default_ttl_set(uint8_t ttl);
 
 /**
  * Gets the default TTL for the node.
@@ -102,26 +99,6 @@ uint8_t access_default_ttl_get(void);
  */
 uint32_t access_model_publish_address_set(access_model_handle_t handle,
                                           dsm_handle_t address_handle);
-/**
- * Stops the publication with the resetting of states for the given model.
- *
- * @param[in]  handle                   Access model handle.
- *
- * @retval     NRF_SUCCESS              Success.
- * @retval     NRF_ERROR_NOT_FOUND      Access handle invalid.
- */
-uint32_t access_model_publication_stop(access_model_handle_t handle);
-
-/**
- * Stops the publication with the resetting of states for all models
- * which are bound to the @c appkey_handle application key.
- *
- * @param[in]  appkey_handle            Application key handle.
- *
- * @retval     NRF_SUCCESS              Success.
- * @retval     NRF_ERROR_INVALID_PARAM  Application key handle invalid.
- */
-uint32_t access_model_publication_by_appkey_stop(dsm_handle_t appkey_handle);
 
 /**
  * Gets the current publish address for the given model.
@@ -138,31 +115,6 @@ uint32_t access_model_publication_by_appkey_stop(dsm_handle_t appkey_handle);
  */
 uint32_t access_model_publish_address_get(access_model_handle_t handle,
                                           dsm_handle_t * p_address_handle);
-/**
- * Sets the publish retransmit parameters for the given model.
- *
- * @param[in]  handle            Access model handle.
- * @param[in]  retransmit_params Retransmit parameters to be set.
- *
- * @retval NRF_SUCCESS             Successfully set the retransmit params.
- * @retval NRF_ERROR_NOT_FOUND     Access handle invalid.
- */
-uint32_t access_model_publish_retransmit_set(access_model_handle_t handle,
-                                             access_publish_retransmit_t retransmit_params);
-
-/**
- * Gets the current publish retransmit parameters for the given model.
- *
- *
- * @param[in]  handle              Access model handle.
- * @param[out] p_retransmit_params Pointer to store the current publish retransmit params.
- *
- * @retval NRF_SUCCESS             Successfully returned the publish retransmit params.
- * @retval NRF_ERROR_NULL          Null pointer given to function.
- * @retval NRF_ERROR_NOT_FOUND     Access handle invalid.
- */
-uint32_t access_model_publish_retransmit_get(access_model_handle_t handle,
-                                             access_publish_retransmit_t * p_retransmit_params);
 
 /**
  * Sets the publish period for the given model.
@@ -215,7 +167,7 @@ uint32_t access_model_publish_period_get(access_model_handle_t handle,
 uint32_t access_model_subscription_add(access_model_handle_t handle, dsm_handle_t address_handle);
 
 /**
- * Removes a subscription from a model.
+ * Remove a subscription from a model.
  *
  * @param[in]  handle                   Access model handle.
  * @param[in]  address_handle           Address to remove from the model's subscription list.
@@ -258,7 +210,7 @@ uint32_t access_model_subscriptions_get(access_model_handle_t handle,
 uint32_t access_model_application_bind(access_model_handle_t handle, dsm_handle_t appkey_handle);
 
 /**
- * Unbinds an application key from a model.
+ * Unbind an application key from a model.
  *
  * @param[in]  handle                   Access model handle.
  * @param[in]  appkey_handle            Application handle to remove from the model.
@@ -289,7 +241,7 @@ uint32_t access_model_applications_get(access_model_handle_t handle,
 /**
  * Sets the application key to be used when publishing for the given model.
  *
- * @note       To unbind the application key, set appkey_handle to @ref DSM_HANDLE_INVALID.
+ * @note       To "unbind" the application key, set appkey_handle to @ref DSM_HANDLE_INVALID.
  *
  * @param[in]  handle                   Access model handle.
  * @param[in]  appkey_handle            Application handle to bind with model.
@@ -315,29 +267,6 @@ uint32_t access_model_publish_application_get(access_model_handle_t handle,
                                               dsm_handle_t * p_appkey_handle);
 
 /**
- * Sets the friendship credentials flag value for the given model.
- *
- * @param[in]  handle  Access model handle.
- * @param[in]  flag    New friendship credentials flag value.
- *
- * @retval     NRF_SUCCESS              Successfully set the default publication TTL value.
- * @retval     NRF_ERROR_NOT_FOUND      Access handle invalid.
- */
-uint32_t access_model_publish_friendship_credential_flag_set(access_model_handle_t handle, bool flag);
-
-/**
- * Gets the friendship credentials flag value for the given model.
- *
- * @param[in]  handle  Access model handle.
- * @param[in]  p_flag  Pointer to store the friendship credentials flag value.
- *
- * @retval NRF_SUCCESS                  Successfully retrived the friendship credentials flag value.
- * @retval NRF_ERROR_NULL               NULL pointer given to function.
- * @retval NRF_ERROR_NOT_FOUND          Access handle invalid.
- */
-uint32_t access_model_publish_friendship_credential_flag_get(access_model_handle_t handle, bool * p_flag);
-
-/**
  * Sets the default publication TTL value for the given model.
  *
  * @param[in]  handle                   Access model handle.
@@ -355,7 +284,7 @@ uint32_t access_model_publish_ttl_set(access_model_handle_t handle, uint8_t ttl)
  * @param[in]  handle Access model handle.
  * @param[out] p_ttl  Pointer to store the default TTL value.
  *
- * @retval NRF_SUCCESS             Successfully retrived the default publication TTL value.
+ * @retval NRF_SUCCESS             Successfully stored the default publication TTL value.
  * @retval NRF_ERROR_NULL          NULL pointer given to function.
  * @retval NRF_ERROR_NOT_FOUND     Access handle invalid.
  */
@@ -388,8 +317,6 @@ uint32_t access_model_p_args_get(access_model_handle_t handle, void ** pp_args);
 /**
  * Allocates a subscription list for a model.
  *
- * Allocating a subscription list for a model that already has one allocated results in Success and does not cause changes to the already allocated subscription list.
- *
  * @param[in]  handle                   Model handle to allocate list for.
  *
  * @retval     NRF_SUCCESS              Successfully allocated subscription list.
@@ -401,41 +328,20 @@ uint32_t access_model_p_args_get(access_model_handle_t handle, void ** pp_args);
 uint32_t access_model_subscription_list_alloc(access_model_handle_t handle);
 
 /**
- * De-allocates a subscription list for a model.
- *
- * This function is intended to be used during the initialization of the extended models.
- * De-allocating a subscription list for a model that does not have any list allocated yet results in Success.
- * It is not allowed to de-allocate the subscription list once the model-subscription list
- * configuration is written in the flash or when access layer data is being stored to the flash.
- *
- * @param[in]  handle                   Model handle to de-allocate list for.
- *
- * @retval     NRF_SUCCESS              Successfully de-allocated subscription list.
- * @retval     NRF_ERROR_NOT_FOUND      Access handle invalid.
- * @retval     NRF_ERROR_FORBIDDEN      Subscription list is already allocated and stored in the
- *                                      flash and cannot be de-allocated, or Access layer flash
- *                                      operations are underway.
- *
- */
-uint32_t access_model_subscription_list_dealloc(access_model_handle_t handle);
-
-/**
  * Shares the subscription lists for two models.
  *
- * This function is used with models that operate on bound states and need to share a single
- * subscription list. Subscription list of the `owner` will be shared with `other`. If the `other`
- * model already has a subscription list allocated, this API will de-allocate it before sharing
- * the list of the `owner`.
+ * This function is used with models that operate on bound states and needs to share a single
+ * subscription list. Only one of the models that shares a subscription list needs to allocate
+ * the list.
  *
  * @param[in]  owner                    The owner of the subscription list (the model handle that
- *                                      has allocated a subscription list).
- * @param[in]  other                    The model that will share the owner's subscription list.
+ *                                      allocated it).
+ * @param[in]  other                    The model that should share the owner's subscription list.
  *
  * @retval     NRF_SUCCESS              Successfully shared the subscription list.
  * @retval     NRF_ERROR_NOT_FOUND      Access handle invalid for one or more of the models.
- * @retval     NRF_ERROR_INVALID_STATE  Invalid parameter combination. The owner must have a
+ * @retval     NRF_ERROR_INVALID_STATE  Invalid parameter combination. Only the owner should have a
  *                                      subscription list allocated.
- * @retval     NRF_ERROR_FORBIDDEN      If model configuration is stored in the flash and cannot be changed.
  */
 uint32_t access_model_subscription_lists_share(access_model_handle_t owner, access_model_handle_t other);
 
@@ -530,13 +436,6 @@ uint32_t access_element_models_get(uint16_t element_index, access_model_handle_t
  */
 uint32_t access_handle_get(uint16_t element_index, access_model_id_t model_id, access_model_handle_t * p_handle);
 
-
-/**
- * Gets a pointer to the flash area used by access.
- *
- * @returns A pointer to access flash area.
- */
-const void * access_flash_area_get(void);
 
 /** @} */
 #endif  /* ACCESS_CONFIG_H__ */

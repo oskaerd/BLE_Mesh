@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -41,12 +41,6 @@
 #include <string.h>
 #include <stdbool.h>
 #include "hal.h"
-
-#if !defined _lint && !defined HOST
-#   include "app_util.h"
-#else
-#   include "nordic_common.h"
-#endif
 
 /**
  * @defgroup UTILS Utility functions
@@ -104,35 +98,19 @@
 #define DEBUG_ATOMIC_FUNCTION_EXIT(lock)    {}
 #endif
 
-#if HOST
-#define IS_VALID_RAM_ADDR(ADDR) (true)
-#else
 /** Check if an address is a valid RAM address. */
 #define IS_VALID_RAM_ADDR(ADDR)     (                                                              \
         (((uint32_t)(ADDR) > DATA_RAM_START) && ((uint32_t)(ADDR) < DEVICE_DATA_RAM_END_GET())) || \
         (((uint32_t)(ADDR) > CODE_RAM_START) && ((uint32_t)(ADDR) < DEVICE_CODE_RAM_END_GET()))    \
                                     )
-#endif
-
 /** Check whether the given pointer is page aligned. */
 #define IS_PAGE_ALIGNED(p) (((uint32_t)(p) & (PAGE_SIZE - 1)) == 0)
 /** Check whether the given pointer is word aligned. */
 #define IS_WORD_ALIGNED(p) (((uint32_t)(p) & (WORD_SIZE - 1)) == 0)
-/** Returns an equivalent for a number (X) aligned to given word size (A). Value of A must be 2^n. */
+/** Aligns a given value X to an A-bit value (A must be 2^n). */
 #define ALIGN_VAL(X, A)          (((X)+((A)-1))&~((A)-1))
 /** Checks whether the given value is power of two. */
 #define IS_POWER_OF_2(VALUE) ((VALUE) && (((VALUE) & ((VALUE) - 1)) == 0))
-
-/**@brief Macro for performing rounded integer division (as opposed to truncating the result).
- *
- * @param[in]   A   Numerator.
- * @param[in]   B   Denominator.
- *
- * @return      Rounded (integer) result of dividing A by B.
- */
-#ifndef ROUNDED_DIV
-#define ROUNDED_DIV(A, B) (((A) + ((B) / 2)) / (B))
-#endif
 
 /**
  * Converts hours to seconds.
@@ -140,13 +118,6 @@
  * @return  The number of seconds corresponding to the specified number of hours.
  */
 #define HOURS_TO_SECONDS(t) ((t) * 60 * 60)
-
-/**
- * Converts minutes to milliseconds.
- * @param t The number of minutes.
- * @return  The number of milliseconds corresponding to the specified number of minutes.
- */
-#define MIN_TO_MS(t) ((t) * 60000ul)
 
 /**
  * Converts seconds to microseconds.
@@ -174,28 +145,21 @@
  * @param t The number of milliseconds.
  * @return  The number of seconds corresponding to the specified number of milliseconds.
  */
-#define MS_TO_SEC(t) (ROUNDED_DIV(t, 1000))
-
-/**
- * Converts milliseconds to minutes.
- * @param t The number of milliseconds.
- * @return  The number of minutes corresponding to the specified number of milliseconds.
- */
-#define MS_TO_MIN(t) ((t) / 60000ul)
+#define MS_TO_SEC(t) ((t) / 1000)
 
 /**
  * Converts microseconds to milliseconds.
  * @param t The number of microseconds.
  * @return  The number of milliseconds corresponding to the specified number of microseconds.
  */
-#define US_TO_MS(t) (ROUNDED_DIV(t, 1000))
+#define US_TO_MS(t) ((t) / 1000)
 
 /**
  * Converts microseconds to seconds.
  * @param t The number of microseconds.
  * @return  The number of seconds corresponding to the specified number of microseconds.
  */
-#define US_TO_SEC(t) (ROUNDED_DIV(t, 1000000ul))
+#define US_TO_SEC(t) ((t) / 1000000ul)
 
 /**
  * Macro for checking if min <= val <= max.
@@ -220,20 +184,6 @@
  */
 #define PARENT_BY_FIELD_GET(STRUCT_TYPE, FIELD_NAME, FIELD_POINTER) \
     ((STRUCT_TYPE *) (((uint8_t *)FIELD_POINTER) - offsetof(STRUCT_TYPE, FIELD_NAME)))
-
-/**@brief Macro for performing integer division, making sure the result is rounded up.
- *
- * @details One typical use for this is to compute the number of objects with size B is needed to
- *          hold A number of bytes.
- *
- * @param[in]   A   Numerator.
- * @param[in]   B   Denominator.
- *
- * @return      Integer result of dividing A by B, rounded up.
- */
-#ifndef CEIL_DIV
-#define CEIL_DIV(A, B)   (((A) + (B) - 1) / (B))
-#endif
 
 /**
  * Check if a value is power of two without evaluating the value multiple times.
@@ -305,7 +255,9 @@ static inline void utils_xor(uint8_t * p_dst, const uint8_t * p_src1, const uint
 }
 
 /**
- * Left shift an array of bytes one bit. p_dst and p_src may be the same.
+ * Left shift an array of bytes one bit.
+ *
+ * @warning Cannot be done in place.
  *
  * @param p_dst Destination address.
  * @param p_src Source address.
@@ -313,12 +265,16 @@ static inline void utils_xor(uint8_t * p_dst, const uint8_t * p_src1, const uint
  */
 static inline void utils_lshift(uint8_t * p_dst, const uint8_t * p_src, uint16_t size)
 {
-    for (uint16_t i = 0; i < size - 1; ++i)
+    uint8_t overflow;
+
+    overflow = 0;
+    while (0 != size)
     {
-        p_dst[i] = (p_src[i] << 1);
-        p_dst[i] |= !!(p_src[i + 1] & 0x80);
+        size--;
+        p_dst[size] = p_src[size] << 1;
+        p_dst[size] |= overflow;
+        overflow = p_src[size] >> 7;
     }
-    p_dst[size - 1] = (p_src[size - 1] << 1);
 }
 
 /**

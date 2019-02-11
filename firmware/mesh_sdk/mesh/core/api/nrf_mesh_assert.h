@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -47,6 +47,13 @@
  * @{
  */
 
+/**
+ * Pointer to the assert handler.
+ * This is normally defined in nrf_mesh.c. If writing unit tests, this is defined
+ * in test_assert.c, which can be found in the test source directory.
+ */
+extern nrf_mesh_assertion_handler_t m_assertion_handler;
+
 /* Include compiler specific definitions: */
 #if defined(_lint)
     #include "nrf_mesh_assert_lint.h"
@@ -58,30 +65,32 @@
     #error "Your compiler is currently not supported."
 #endif
 
-extern void mesh_assertion_handler(uint32_t pc);
-
 /**
  * Run-time assertion.
  * Will trigger the assertion handler if the specified condition evaluates to false.
  * @param[in] cond Condition to evaluate.
  */
-#define NRF_MESH_ASSERT(cond)               \
-    do                                      \
-    {                                       \
-        if (!(cond))                        \
-        {                                   \
-            uint32_t pc;                    \
-            GET_PC(pc);                     \
-            mesh_assertion_handler(pc);     \
-        }                                   \
-    } while (0)
+#define NRF_MESH_ASSERT(cond)            \
+    if (!(cond))                         \
+    {                                    \
+        uint32_t pc;                     \
+        GET_PC(pc);                      \
+        if (m_assertion_handler)         \
+        {                                \
+            m_assertion_handler(pc);     \
+        }                                \
+        else                             \
+        {                                \
+            HARD_FAULT();                \
+        }                                \
+    }
 
 /**
  * Run-time assertion for debug use.
  * Debug assertions are only run if the stack is compiled in debug mode.
  */
 #ifdef NDEBUG /* The NDEBUG define is added automatically when compiling in release mode. */
-    #define NRF_MESH_ASSERT_DEBUG(cond) (void) (cond)
+    #define NRF_MESH_ASSERT_DEBUG(cond) (void) cond
 #else
     #define NRF_MESH_ASSERT_DEBUG(cond) NRF_MESH_ASSERT(cond)
 #endif

@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -40,7 +40,6 @@
 #include <string.h>
 
 #include "access_reliable.h"
-#include "packet_mesh.h"
 #include "test_assert.h"
 
 #include "access_mock.h"
@@ -380,13 +379,6 @@ void test_multiple_cancels(void)
         }
         bearer_event_critical_section_begin_Expect();
         bearer_event_critical_section_end_Expect();
-
-        void * p_args = (uint8_t *) TEST_ARGS_PTR + i;
-        access_model_p_args_get_ExpectAndReturn(m_reliables[i].model_handle, NULL, NRF_SUCCESS);
-        access_model_p_args_get_IgnoreArg_pp_args();
-        access_model_p_args_get_ReturnThruPtr_pp_args(&p_args);
-        status_cb_Expect(m_reliables[i].model_handle, p_args, ACCESS_RELIABLE_TRANSFER_CANCELLED);
-
         (void) access_model_reliable_cancel(m_reliables[i].model_handle);
     }
 
@@ -401,13 +393,6 @@ void test_multiple_cancels(void)
         }
         bearer_event_critical_section_begin_Expect();
         bearer_event_critical_section_end_Expect();
-
-        void * p_args = (uint8_t *) TEST_ARGS_PTR + i;
-        access_model_p_args_get_ExpectAndReturn(m_reliables[i].model_handle, NULL, NRF_SUCCESS);
-        access_model_p_args_get_IgnoreArg_pp_args();
-        access_model_p_args_get_ReturnThruPtr_pp_args(&p_args);
-        status_cb_Expect(m_reliables[i].model_handle, p_args, ACCESS_RELIABLE_TRANSFER_CANCELLED);
-
         (void) access_model_reliable_cancel(m_reliables[i].model_handle);
     }
 
@@ -463,11 +448,6 @@ void test_error_conditions(void)
     __timer_abort_ExpectAndReturn(TIMER_STATE_RUNNING);
     bearer_event_critical_section_begin_Expect();
     bearer_event_critical_section_end_Expect();
-    void * p_args = (uint8_t *) TEST_ARGS_PTR;
-    access_model_p_args_get_ExpectAndReturn(p_reliable->model_handle, NULL, NRF_SUCCESS);
-    access_model_p_args_get_IgnoreArg_pp_args();
-    access_model_p_args_get_ReturnThruPtr_pp_args(&p_args);
-    status_cb_Expect(p_reliable->model_handle, p_args, ACCESS_RELIABLE_TRANSFER_CANCELLED);
     TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_reliable_cancel(p_reliable->model_handle));
     initialize_contexts();
 
@@ -498,7 +478,6 @@ void test_sar_packet(void)
     const uint8_t data[128] = {0};
     uint8_t ttl = 0;
     access_reliable_t * p_reliable = &m_reliables[0];
-    void * p_args;
     p_reliable->model_handle = 0;
     p_reliable->reply_opcode.opcode = 0x02;
     p_reliable->reply_opcode.company_id = ACCESS_COMPANY_ID_NONE;
@@ -528,18 +507,13 @@ void test_sar_packet(void)
     __timer_abort_ExpectAndReturn(TIMER_STATE_RUNNING);
     bearer_event_critical_section_begin_Expect();
     bearer_event_critical_section_end_Expect();
-    p_args = (uint8_t *) TEST_ARGS_PTR;
-    access_model_p_args_get_ExpectAndReturn(p_reliable->model_handle, NULL, NRF_SUCCESS);
-    access_model_p_args_get_IgnoreArg_pp_args();
-    access_model_p_args_get_ReturnThruPtr_pp_args(&p_args);
-    status_cb_Expect(p_reliable->model_handle, p_args, ACCESS_RELIABLE_TRANSFER_CANCELLED);
     TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_reliable_cancel(p_reliable->model_handle));
 
     /* 2 byte opcode should push it just over the limit to SAR */
     uint32_t expected_segments = 3;
     memcpy(&p_reliable->message.opcode, &OPCODE_2BYTE, sizeof(access_opcode_t));
     p_reliable->message.p_buffer = data;
-    p_reliable->message.length   = PACKET_MESH_TRS_SEG_ACCESS_PDU_MAX_SIZE * (expected_segments - 1) - 1;
+    p_reliable->message.length   = NRF_MESH_SEG_SIZE * (expected_segments - 1) - 1;
 
     expected_timeout = (ACCESS_RELIABLE_INTERVAL_DEFAULT
                         + ACCESS_RELIABLE_SEGMENT_COUNT_PENALTY * expected_segments);
@@ -558,18 +532,13 @@ void test_sar_packet(void)
     __timer_abort_ExpectAndReturn(TIMER_STATE_RUNNING);
     bearer_event_critical_section_begin_Expect();
     bearer_event_critical_section_end_Expect();
-    p_args = (uint8_t *) TEST_ARGS_PTR;
-    access_model_p_args_get_ExpectAndReturn(p_reliable->model_handle, NULL, NRF_SUCCESS);
-    access_model_p_args_get_IgnoreArg_pp_args();
-    access_model_p_args_get_ReturnThruPtr_pp_args(&p_args);
-    status_cb_Expect(p_reliable->model_handle, p_args, ACCESS_RELIABLE_TRANSFER_CANCELLED);
     TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_reliable_cancel(p_reliable->model_handle));
 
     /* 3 byte opcode should push it just over the limit to SAR */
     expected_segments = 5;
     memcpy(&p_reliable->message.opcode, &OPCODE_3BYTE, sizeof(access_opcode_t));
     p_reliable->message.p_buffer = data;
-    p_reliable->message.length   = PACKET_MESH_TRS_SEG_ACCESS_PDU_MAX_SIZE * (expected_segments - 1) - 2;
+    p_reliable->message.length   = NRF_MESH_SEG_SIZE * (expected_segments - 1) - 2;
 
     expected_timeout = (ACCESS_RELIABLE_INTERVAL_DEFAULT
                         + ACCESS_RELIABLE_SEGMENT_COUNT_PENALTY * expected_segments);
@@ -588,11 +557,6 @@ void test_sar_packet(void)
     __timer_abort_ExpectAndReturn(TIMER_STATE_RUNNING);
     bearer_event_critical_section_begin_Expect();
     bearer_event_critical_section_end_Expect();
-    p_args = (uint8_t *) TEST_ARGS_PTR;
-    access_model_p_args_get_ExpectAndReturn(p_reliable->model_handle, NULL, NRF_SUCCESS);
-    access_model_p_args_get_IgnoreArg_pp_args();
-    access_model_p_args_get_ReturnThruPtr_pp_args(&p_args);
-    status_cb_Expect(p_reliable->model_handle, p_args, ACCESS_RELIABLE_TRANSFER_CANCELLED);
     TEST_ASSERT_EQUAL(NRF_SUCCESS, access_model_reliable_cancel(p_reliable->model_handle));
 }
 
@@ -642,109 +606,4 @@ void test_rx_wrong_opcode(void)
 
     }
     verify_callbacks();
-}
-
-void test_access_reliable_model_is_free(void)
-{
-    printf("\n----------------Start Test---------------\n");
-    /* Initialize all contexts */
-    initialize_contexts();
-    /* Should be ACCESS_RELIABLE_TRANSFER_COUNT spaced TIME_SPACING in time
-     *
-     * |---------|----------...------------------------|------------------------>
-     * 0   TIME_SPACING*1        TIME_SPACING*ACCESS_RELIABLE_TRANSFER_COUNT   t
-     */
-
-    printf("---> Fire all except last timeout.\n");
-    uint32_t time = ACCESS_RELIABLE_INTERVAL_DEFAULT;
-    for (; time < ACCESS_RELIABLE_TIMEOUT_MIN; time *= ACCESS_RELIABLE_BACK_OFF_FACTOR)
-    {
-        __test_timeout_fire_round(time);
-    }
-    verify_callbacks();
-
-    /* Test if the model context are free */
-    for (uint32_t i=0; i<ACCESS_RELIABLE_TRANSFER_COUNT; i++)
-    {
-        TEST_ASSERT_EQUAL(false, access_reliable_model_is_free(m_reliables[i].model_handle));
-    }
-
-    printf("---> Let the first, last and middle transfer succeed.\n");
-    time = ACCESS_RELIABLE_TIMEOUT_MIN;
-    /* . */
-    uint32_t remove_bitfield = (1 << 0) | (1 << (ACCESS_RELIABLE_TRANSFER_COUNT-1)) | (1 << (ACCESS_RELIABLE_TRANSFER_COUNT / 2));
-    access_message_rx_t rx_message = {0};
-    for (uint32_t i = 0; i < ACCESS_RELIABLE_TRANSFER_COUNT; ++i)
-    {
-        if (((1 << i) & remove_bitfield) == 0)
-        {
-            continue;
-        }
-
-        access_reliable_t * p_ctx = &m_reliables[i];
-        rx_message.opcode.opcode = p_ctx->reply_opcode.opcode;
-        rx_message.opcode.company_id = p_ctx->reply_opcode.company_id;
-        void * p_args = (uint8_t *) TEST_ARGS_PTR + i;
-        if (i == 0)
-        {
-            /* Expect a reschedule when clearing HEAD */
-            timer_reschedule_ExpectAndReturn(TIMER_STATE_RUNNING, time + TIME_SPACING);
-        }
-
-        bearer_event_critical_section_begin_Expect();
-        bearer_event_critical_section_end_Expect();
-        status_cb_Expect(p_ctx->model_handle, p_args, ACCESS_RELIABLE_TRANSFER_SUCCESS);
-        access_reliable_message_rx_cb(p_ctx->model_handle, &rx_message, p_args);
-    }
-    verify_callbacks();
-
-    /* Test if the model context are free for the first last and middle contexts, and others are busy */
-    TEST_ASSERT_EQUAL(true, access_reliable_model_is_free(m_reliables[0].model_handle));
-    TEST_ASSERT_EQUAL(true, access_reliable_model_is_free(m_reliables[(ACCESS_RELIABLE_TRANSFER_COUNT-1)].model_handle));
-    TEST_ASSERT_EQUAL(true, access_reliable_model_is_free(m_reliables[(ACCESS_RELIABLE_TRANSFER_COUNT/2)].model_handle));
-    for (uint32_t i=0; i<ACCESS_RELIABLE_TRANSFER_COUNT; i++)
-    {
-        if (i == 0 || i == (ACCESS_RELIABLE_TRANSFER_COUNT-1) || i == (ACCESS_RELIABLE_TRANSFER_COUNT/2))
-        {
-            continue;
-        }
-        TEST_ASSERT_EQUAL(false, access_reliable_model_is_free(m_reliables[i].model_handle));
-    }
-
-    printf("---> Timeout the remaining contexts.\n");
-    void * p_args;
-    /* Timeout the remaining contexts */
-    uint32_t remaining_bitfield = (~remove_bitfield) & (~(1 << ACCESS_RELIABLE_TRANSFER_COUNT));
-    for (int i = 0; i < ACCESS_RELIABLE_TRANSFER_COUNT; ++i)
-    {
-        if ((remaining_bitfield & (1 << i)) > 0)
-        {
-            if ((remaining_bitfield & (1 << (i+1))) > 0)
-            {
-                /* The next is not removed */
-                timer_reschedule_ExpectAndReturn(TIMER_STATE_RUNNING,
-                                                 ACCESS_RELIABLE_TIMEOUT_MIN + TIME_SPACING*(i + 1));
-            }
-            else if ((remaining_bitfield & (1 << (i+2))) > 0)
-            {
-                /* The one after the next is not removed */
-                timer_reschedule_ExpectAndReturn(TIMER_STATE_RUNNING,
-                                                 ACCESS_RELIABLE_TIMEOUT_MIN + TIME_SPACING*(i + 2));
-            }
-
-            p_args = (uint8_t *) TEST_ARGS_PTR + i;
-            printf("p_args: %p\n", p_args);
-            access_model_p_args_get_ExpectAndReturn(m_reliables[i].model_handle, NULL, NRF_SUCCESS);
-            access_model_p_args_get_IgnoreArg_pp_args();
-            access_model_p_args_get_ReturnThruPtr_pp_args(&p_args);
-            status_cb_Expect(m_reliables[i].model_handle, p_args, ACCESS_RELIABLE_TRANSFER_TIMEOUT);
-            fire_timeout(time + i*TIME_SPACING, NULL);
-        }
-    }
-
-    /* Test if the model context are free */
-    for (uint32_t i=0; i<ACCESS_RELIABLE_TRANSFER_COUNT; i++)
-    {
-        TEST_ASSERT_EQUAL(true, access_reliable_model_is_free(m_reliables[i].model_handle));
-    }
 }

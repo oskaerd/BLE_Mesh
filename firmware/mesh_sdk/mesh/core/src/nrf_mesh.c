@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -57,6 +57,7 @@
 #include "packet.h"
 #include "nrf_mesh_dfu.h"
 #include "dfu_types_internal.h"
+#include "ticker.h"
 #include "timer_scheduler.h"
 #include "timeslot.h"
 #include "toolchain.h"
@@ -67,34 +68,23 @@
 #include "utils.h"
 #include "log.h"
 #include "mesh_flash.h"
+#include "flash_manager.h"
 #include "scanner.h"
 #include "ad_listener.h"
-#include "mesh_mem.h"
+#include "packet_mgr.h"
 #include "core_tx_adv.h"
 #include "core_tx_instaburst.h"
-#include "core_tx_lpn.h"
 #include "instaburst_rx.h"
 #include "heartbeat.h"
+
 #include "prov_bearer_adv.h"
-#include "mesh_config.h"
-#include "mesh_opt.h"
 
-#if MESH_FEATURE_GATT_PROXY_ENABLED
-#include "proxy.h"
-#endif  /* MESH_FEATURE_GATT_PROXY_ENABLED */
+/** Function pointer to mesh assertion handler. */
+nrf_mesh_assertion_handler_t m_assertion_handler;
 
-static enum
-{
-    MESH_STATE_UNINITIALIZED, /**< Uninitialized state. */
-    MESH_STATE_INITIALIZED,   /**< Initialized, but never enabled. */
-    MESH_STATE_ENABLED,       /**< Enabled state. */
-    MESH_STATE_DISABLING,     /**< Disabling in progress. */
-    MESH_STATE_DISABLED,      /**< Disabled by user. */
-} m_mesh_state;
+static bool m_is_enabled;
+static bool m_is_initialized;
 static nrf_mesh_rx_cb_t m_rx_cb;
-
-/** Unique Tx token. */
-static nrf_mesh_tx_token_t m_tx_token = NRF_MESH_INITIAL_TOKEN;
 
 static bool scanner_packet_process_cb(void);
 
@@ -265,21 +255,9 @@ static bool instaburst_packet_process_cb(void)
 }
 #endif
 
-static void bearer_stopped_cb(void)
-{
-    if (m_mesh_state == MESH_STATE_DISABLING)
-    {
-        m_mesh_state = MESH_STATE_DISABLED;
-        const nrf_mesh_evt_t disabled = {
-            .type = NRF_MESH_EVT_DISABLED,
-        };
-        event_handle(&disabled);
-    }
-}
-
 uint32_t nrf_mesh_init(const nrf_mesh_init_params_t * p_init_params)
 {
-    if (m_mesh_state != MESH_STATE_UNINITIALIZED)
+    if (m_is_initialized)
     {
         return NRF_ERROR_INVALID_STATE;
     }
@@ -289,23 +267,16 @@ uint32_t nrf_mesh_init(const nrf_mesh_init_params_t * p_init_params)
         return NRF_ERROR_NULL;
     }
 
+    m_assertion_handler = p_init_params->assertion_handler;
+
     uint8_t irq_priority = p_init_params->irq_priority;
-    if ((irq_priority != NRF_MESH_IRQ_PRIORITY_THREAD) &&
-        (irq_priority != NRF_MESH_IRQ_PRIORITY_LOWEST))
+    if ((irq_priority == 0) ||
+        ((irq_priority != NRF_MESH_IRQ_PRIORITY_THREAD) && (irq_priority > NRF_MESH_IRQ_PRIORITY_LOWEST)))
     {
         return NRF_ERROR_INVALID_PARAM;
     }
 
-    mesh_mem_init();
-
-    if (p_init_params->p_uuid != NULL)
-    {
-        nrf_mesh_configure_device_uuid_set(p_init_params->p_uuid);
-    }
-    else
-    {
-        nrf_mesh_configure_device_uuid_reset();
-    }
+    nrf_mesh_configure_device_uuid_reset();
 
 #if !defined(HOST)
     uint8_t softdevice_enabled;
@@ -330,7 +301,7 @@ uint32_t nrf_mesh_init(const nrf_mesh_init_params_t * p_init_params)
     bearer_event_init(irq_priority);
 
 #if !defined(HOST)
-#if NRF_SD_BLE_API_VERSION >= 5
+#if SD_BLE_API_VERSION >= 5
     /* From SD BLE API 5 and on, both RC and XTAL should use the PPM-defines. */
     uint32_t lfclk_accuracy = hal_lfclk_ppm_get(p_init_params->lfclksrc.accuracy);
 #elif defined(S110)
@@ -352,21 +323,19 @@ uint32_t nrf_mesh_init(const nrf_mesh_init_params_t * p_init_params)
 
     mesh_flash_init();
 #if PERSISTENT_STORAGE
-    mesh_config_init();
+    flash_manager_init();
 #endif
-    mesh_opt_init();
 
 #if EXPERIMENTAL_INSTABURST_ENABLED
     core_tx_instaburst_init();
 #else
     core_tx_adv_init();
 #endif
-#if MESH_FEATURE_LPN_ENABLED
-    core_tx_lpn_init();
-#endif
     network_init(p_init_params);
     transport_init(p_init_params);
     heartbeat_init();
+    beacon_init(1000 * NRF_MESH_BEACON_SECURE_NET_BCAST_INTERVAL_SECONDS);
+    packet_mgr_init(p_init_params);
 
 #if !defined(HOST)
     status = nrf_mesh_dfu_init();
@@ -376,69 +345,67 @@ uint32_t nrf_mesh_init(const nrf_mesh_init_params_t * p_init_params)
     }
 #endif
 
+    ticker_init();
+
     (void) ad_listener_subscribe(&m_nrf_mesh_listener);
 
     m_rx_cb = NULL;
-    m_mesh_state = MESH_STATE_INITIALIZED;
+    m_is_initialized = true;
 
     return NRF_SUCCESS;
 }
 
 uint32_t nrf_mesh_enable(void)
 {
-    uint32_t status = NRF_ERROR_INVALID_STATE;
-    switch (m_mesh_state)
+    if (!m_is_initialized || m_is_enabled)
     {
-        case MESH_STATE_INITIALIZED:
-#if !MESH_FEATURE_LPN_ENABLED
-            scanner_enable();
+        return NRF_ERROR_INVALID_STATE;
+    }
+    else
+    {
+#if !defined(HOST)
+        NRF_MESH_ASSERT(timeslot_start() == NRF_SUCCESS);
 #endif
-            network_enable();
-            transport_enable();
+        uint32_t status = bearer_handler_start();
+        if (status != NRF_SUCCESS)
+        {
+            return status;
+        }
+
+        scanner_enable();
 
 #if EXPERIMENTAL_INSTABURST_ENABLED
-            instaburst_rx_enable();
+        instaburst_rx_enable();
 #endif
 
-#if !defined(HOST)
-            status = nrf_mesh_dfu_enable();
-            if ((status != NRF_SUCCESS) && (status != NRF_ERROR_NOT_SUPPORTED))
-            {
-                __LOG(LOG_SRC_APP, LOG_LEVEL_WARN, "nrf_mesh_dfu_enable() failed [0x%X]\n",status);
-                return status;
-            }
-#endif
-            bearer_event_start();
-            /* fallthrough */
-        case MESH_STATE_DISABLED:
-        case MESH_STATE_DISABLING:
-            status = bearer_handler_start();
-            break;
-        default:
-            return NRF_ERROR_INVALID_STATE;
+        m_is_enabled = true;
+        return NRF_SUCCESS;
     }
-
-    if (status == NRF_SUCCESS)
-    {
-        m_mesh_state = MESH_STATE_ENABLED;
-    }
-    return status;
 }
 
 uint32_t nrf_mesh_disable(void)
 {
-    if (m_mesh_state != MESH_STATE_ENABLED)
+    if (!m_is_enabled)
     {
         return NRF_ERROR_INVALID_STATE;
     }
+    else
+    {
+        uint32_t status = bearer_handler_stop();
+        if (status != NRF_SUCCESS)
+        {
+            return status;
+        }
 
-    m_mesh_state = MESH_STATE_DISABLING;
-    /* This module owns the bearer handler start/stop process, and should never have called
-     * bearer_handler_stop if it was in an invalid state. The bearer handler will call our callback
-     * once it has been stopped (may be inline). */
-    NRF_MESH_ERROR_CHECK(bearer_handler_stop(bearer_stopped_cb));
+        scanner_disable();
 
-    return NRF_SUCCESS;
+#if !defined(HOST)
+        timeslot_stop();
+#endif
+
+        m_is_enabled = false;
+        return NRF_SUCCESS;
+    }
 }
 
 uint32_t nrf_mesh_packet_send(const nrf_mesh_tx_params_t * p_params,
@@ -452,6 +419,25 @@ bool nrf_mesh_process(void)
     return bearer_event_handler();
 }
 
+uint32_t nrf_mesh_on_ble_evt(ble_evt_t * p_ble_evt)
+{
+    /**
+     * @todo Populate with GATT handling when the time comes.
+     */
+    return NRF_SUCCESS;
+}
+
+uint32_t nrf_mesh_on_sd_evt(uint32_t sd_evt)
+{
+    /**
+     * @todo Add handler for ECB events.
+     */
+#if !defined(HOST)
+    timeslot_sd_event_handler(sd_evt);
+#endif
+    return NRF_SUCCESS;
+}
+
 void nrf_mesh_evt_handler_add(nrf_mesh_evt_handler_t * p_handler_params)
 {
     event_handler_add(p_handler_params);
@@ -462,12 +448,6 @@ void nrf_mesh_evt_handler_remove(nrf_mesh_evt_handler_t * p_handler_params)
     event_handler_remove(p_handler_params);
 }
 
-uint32_t nrf_mesh_on_sd_evt(uint32_t sd_evt)
-{
-    timeslot_sd_event_handler(sd_evt);
-    return NRF_SUCCESS;
-}
-
 void nrf_mesh_rx_cb_set(nrf_mesh_rx_cb_t rx_cb)
 {
     m_rx_cb = rx_cb;
@@ -476,22 +456,4 @@ void nrf_mesh_rx_cb_set(nrf_mesh_rx_cb_t rx_cb)
 void nrf_mesh_rx_cb_clear(void)
 {
     m_rx_cb = NULL;
-}
-
-void nrf_mesh_subnet_added(uint16_t net_key_index, const uint8_t * p_network_id)
-{
-#if MESH_FEATURE_GATT_PROXY_ENABLED
-    proxy_subnet_added(net_key_index, p_network_id);
-#endif
-}
-
-nrf_mesh_tx_token_t nrf_mesh_unique_token_get(void)
-{
-   if (++m_tx_token == NRF_MESH_SERVICE_BORDER_TOKEN)
-   {
-       m_tx_token = NRF_MESH_INITIAL_TOKEN;
-       m_tx_token++;
-   }
-
-   return m_tx_token;
 }

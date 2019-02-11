@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2018, Nordic Semiconductor ASA
+/* Copyright (c) 2010 - 2017, Nordic Semiconductor ASA
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -135,7 +135,6 @@ void test_tv1(void)
     bool mic_passed;
     ccm_soft_decrypt(&ccm_data, &mic_passed);
 
-    TEST_ASSERT_TRUE(mic_passed);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(tv1_in, m_out_buffer, sizeof(tv1_in));
 }
 
@@ -172,7 +171,6 @@ void test_tv2(void)
     bool mic_passed;
     ccm_soft_decrypt(&ccm_data, &mic_passed);
 
-    TEST_ASSERT_TRUE(mic_passed);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(tv2_in, m_out_buffer, sizeof(tv2_in));
 }
 
@@ -209,6 +207,5 @@ void test_tv18(void)
     bool mic_passed;
     ccm_soft_decrypt(&ccm_data, &mic_passed);
 
-    TEST_ASSERT_TRUE(mic_passed);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(tv18_in, m_out_buffer, sizeof(tv18_in));
 }
