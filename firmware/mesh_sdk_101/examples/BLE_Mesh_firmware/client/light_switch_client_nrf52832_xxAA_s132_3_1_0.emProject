@@ -38,6 +38,7 @@
       <file file_name="../../common/src/simple_hal.c" />
       <file file_name="../../nrf_mesh_weak.c" />
       <file file_name="../our_code/HW_interface.c" />
+      <file file_name="../our_code/migration.c" />
     </folder>
     <folder Name="Core">
       <file file_name="../../../mesh/core/src/internal_event.c" />
